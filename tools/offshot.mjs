@@ -1,0 +1,25 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+await page.goto('http://localhost:5240/?day=3&case=0');
+await page.waitForFunction(() => window.__ready);
+await page.waitForTimeout(600);
+const r = await page.evaluate(() => {
+  const R = __app.review, c = R.case.clip;
+  R.playing = false;
+  R._seek(c.facts.passT);
+  R._setCam('tactical');
+  R._toggleLines();
+  const [runner, last] = c.subjects;
+  R.view.addLine(R.view.players.find((p) => p.actor === runner));
+  R.view.addLine(R.view.players.find((p) => p.actor === last));
+  R.view.focusOn(runner.jointsAt(c.facts.passT).pelvis, 3);
+  __pump(2);
+  return { margin: c.facts.margin, readout: R.readout.textContent, truth: R.case.truth.restart };
+});
+console.log(r);
+await page.screenshot({ path: 'shots/o1.png' });
+await page.evaluate(() => { __app.review._setCam('broadcast'); __app.review.view.focusOn(__app.review.case.clip.subjects[0].jointsAt(__app.review.case.clip.facts.passT).pelvis, 2.5); __pump(2); });
+await page.screenshot({ path: 'shots/o2.png' });
+await browser.close();

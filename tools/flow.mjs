@@ -1,0 +1,30 @@
+// Walk title → day card → inbox → first case → decision → verdict, screenshotting each.
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+page.on('console', (m) => { if (m.type() === 'error') console.log('[err]', m.text()); });
+await page.goto('http://localhost:5240/');
+await page.waitForFunction(() => window.__ready);
+await page.evaluate(() => localStorage.clear());
+await page.reload(); await page.waitForFunction(() => window.__ready);
+await page.waitForTimeout(400);
+await page.screenshot({ path: 'shots/f1-title.png' });
+await page.click('text=Start shift one');
+await page.waitForTimeout(800);
+await page.screenshot({ path: 'shots/f2-card.png' });
+await page.waitForTimeout(1600);
+await page.screenshot({ path: 'shots/f3-inbox.png' });
+await page.click('.mail-list li:nth-child(2)');
+await page.click('text=Start shift →');
+await page.waitForTimeout(1500);
+for (let i = 0; i < 5; i++) { const b = await page.$('.coach button'); if (b) await b.click(); }
+await page.click('.tab:has-text("Decision")');
+await page.click('text=+ Add offence');
+await page.click('.restart:has-text("Penalty")');
+await page.waitForTimeout(200);
+await page.screenshot({ path: 'shots/f4-decision.png' });
+await page.click('text=Confirm decision');
+await page.waitForTimeout(500);
+await page.screenshot({ path: 'shots/f5-verdict.png' });
+await browser.close();
