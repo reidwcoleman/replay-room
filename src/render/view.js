@@ -61,12 +61,13 @@ export class ReplayView {
   }
 
   load(clip) {
-    if (!this.stadium) this.stadium = buildStadium(this.scene, clip.kits.A);
+    if (!this.stadium) this.stadium = buildStadium(this.scene, clip.kits.A, clip.kits.D);
+    else this.stadium.setTeams(clip.kits.A, clip.kits.D);
     for (const p of this.players) this.scene.remove(p.group);
     this.clearLines();
     this.clip = clip;
     this.players = clip.actors.map((a) => {
-      const pm = new PlayerMesh(a, clip.kits[a.team]);
+      const pm = new PlayerMesh(a, clip.kits[a.team], { face: true });
       this.scene.add(pm.group);
       return pm;
     });
@@ -103,8 +104,8 @@ export class ReplayView {
     let pos, look, fov = 30;
     const focus = this.selected ? new THREE.Vector3(...this.selected.actor.jointsAt(this.t).pelvis) : null;
     switch (this.cam) {
-      case 'broadcast': pos = new THREE.Vector3(sb.x * 0.85, 16, -37.5); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 + 2); fov = 25; break;
-      case 'reverse': pos = new THREE.Vector3(sb.x * 0.85, 14, 37.5); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 - 2); fov = 32; break;
+      case 'broadcast': pos = new THREE.Vector3(sb.x * 0.85, 14, -36); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 + 2); fov = 19; break;
+      case 'reverse': pos = new THREE.Vector3(sb.x * 0.85, 11, 36); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 - 2); fov = 24; break;
       case 'behind': pos = new THREE.Vector3(GOAL_X + 5, 6.5, sb.z * 0.25); look = new THREE.Vector3(Math.min(sb.x, GOAL_X - 6) - 4, 0.6, sb.z * 0.6); fov = 40; break;
       case 'tactical': pos = new THREE.Vector3(sb.x, 62, sb.z); look = new THREE.Vector3(sb.x, 0, sb.z); fov = 38; break;
       // High gantry camera sitting exactly in the plane of the goal line's outer edge: that whole
@@ -164,6 +165,8 @@ export class ReplayView {
     const hidden = [];
     for (const l of this.lines) { l.mesh.visible = false; hidden.push(l.mesh); }
     for (const p of this.players) if (p.ring.visible) { p.ring.visible = false; hidden.push(p.ring); }
+    for (const p of this.players) { p.blob.visible = false; hidden.push(p.blob); }
+    if (this.stadium) for (const o of this.stadium.fx) { o.visible = false; hidden.push(o); }
     this.scene.overrideMaterial = this.normalMat;
     r.setRenderTarget(this.ndRT);
     r.render(this.scene, this.camera);
@@ -198,7 +201,7 @@ export class ReplayView {
     const color = pm.actor.team === 'A' ? 0xff3d7f : 0x3ec9ff;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 68), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }));
     mesh.renderOrder = 5;
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(68, 2.2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(68, 2.2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
     wall.rotation.y = Math.PI / 2;
     const g = new THREE.Group();
     g.add(mesh); g.add(wall);
@@ -301,17 +304,24 @@ export class ReplayView {
 const clampPan = (v) => Math.max(-40, Math.min(40, v));
 
 function ballTexture() {
+  // classic 32-panel ball: a dark patch at each of the 12 icosahedron corners, stretched for the projection
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
   const x = c.getContext('2d');
   x.fillStyle = '#f7f7f7'; x.fillRect(0, 0, 256, 128);
-  x.fillStyle = '#1b1f2a';
-  for (let i = 0; i < 10; i++) {
-    const cx = (i * 53) % 256, cy = 20 + ((i * 37) % 90);
-    x.beginPath();
-    for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; x.lineTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13); }
-    x.fill();
-  }
+  const patch = (lon, lat) => {
+    const px = ((lon / (Math.PI * 2)) + 0.5) * 256, py = (0.5 - lat / Math.PI) * 128;
+    const sx = 1 / Math.max(0.25, Math.cos(lat));
+    for (const o of [-256, 0, 256]) {
+      x.save(); x.translate(px + o, py); x.scale(sx, 1);
+      x.fillStyle = '#1b1f2a'; x.beginPath();
+      for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2 - Math.PI / 2; x.lineTo(Math.cos(a) * 13, Math.sin(a) * 13); }
+      x.fill(); x.restore();
+    }
+  };
+  const el = Math.atan(0.5);
+  patch(0, Math.PI / 2 - 0.12); patch(0, -Math.PI / 2 + 0.12);
+  for (let k = 0; k < 5; k++) { patch(-Math.PI + (k * Math.PI * 2) / 5, el); patch(-Math.PI + (k * Math.PI * 2) / 5 + Math.PI / 5, -el); }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

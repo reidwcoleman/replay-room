@@ -83,7 +83,7 @@ export class Terminal {
     }
     if (S.kind === 'review') {
       x.fillStyle = G; x.fillRect(12, 12, W - 24, 26);
-      this._txt(`TAPE ${S.caseNo}/${S.caseCount}`, 20, 17, 16, BG);
+      this._txt(S.caseCount ? `TAPE ${S.caseNo}/${S.caseCount}` : `OVERTIME ${S.caseNo}`, 20, 17, 16, BG);
       const s = Math.floor(S.seconds);
       if (S.pressure > 0.8 && blink) { x.fillStyle = RED; x.fillRect(W - 92, 12, 80, 26); }
       this._txt(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, W - 20, 17, 16, BG, 'right');

@@ -4,8 +4,9 @@ import { chromium } from 'playwright-core';
 const mode = process.argv[2] || 'honest'; // honest | bribe | sloppy
 const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+page.setDefaultTimeout(240000);
 const errs = [];
-page.on('pageerror', (e) => errs.push(e.message));
+page.on('pageerror', (e) => { errs.push(e.message); console.log('[pageerror]', e.message); });
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 await page.goto('http://localhost:5240/?fast');
 await page.waitForFunction(() => window.__ready);

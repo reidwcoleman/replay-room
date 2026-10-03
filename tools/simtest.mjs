@@ -4,19 +4,20 @@ import { rulesFor } from '../src/sim/rules.js';
 import { SCORING, FEET, vec, segDist } from '../src/sim/kinematics.js';
 import { BALL_R, GOAL_X } from '../src/sim/clip.js';
 
-let fails = 0, n = 0;
+let fails = 0, n = 0, n2 = 0;
 const bad = (m) => { fails++; console.log('FAIL', m); };
 const r5 = rulesFor(5), r1 = rulesFor(1);
 const counts = {};
 for (const [name, gen] of Object.entries(GENERATORS)) {
-  for (let seed = 1; seed <= 40; seed++) {
+  for (let seed = 1; seed <= 80; seed++) {
     n++;
+    const tight = seed > 40;
     const R = rng(seed * 7919 + name.length);
     let c;
-    try { c = gen(R); } catch (e) { bad(`${name}#${seed} threw ${e.stack}`); continue; }
+    try { c = gen(R, tight ? { tight: true } : {}); } catch (e) { bad(`${name}#${seed} threw ${e.stack}`); continue; }
     if (seed % 3 === 0) addOffBall(c, R);
     const t = c.resolve(r1);
-    const key = name + ':' + (c.facts.variant ?? c.facts.margin ?? c.facts.delta ?? c.facts.contact);
+    const key = name + (tight ? '*' : '') + ':' + (c.facts.variant ?? c.facts.margin ?? c.facts.delta ?? c.facts.contact);
     counts[key] = (counts[key] || 0) + 1;
     // generic sanity: nobody leaves the pitch or teleports, ball has no jumps
     for (const a of c.actors) {
@@ -44,7 +45,12 @@ for (const [name, gen] of Object.entries(GENERATORS)) {
       const t5 = c.resolve(r5);
       if (c.facts.margin > 0 && c.facts.margin <= 0.1 && t5.restart !== 'Goal stands') bad('tolerance not applied');
     }
-    if (name === 'handball' && ['raised', 'side', 'body'].includes(c.facts.variant)) {
+    if (name === 'handball' && ['wide', 'tucked'].includes(c.facts.variant)) {
+      const a = c.facts.armAngle;
+      if (c.facts.variant === 'wide' && a < 50) bad(`handball#${seed} wide arm only ${a} deg`);
+      if (c.facts.variant === 'tucked' && a > 32) bad(`handball#${seed} tucked arm ${a} deg`);
+    }
+    if (name === 'handball' && ['raised', 'side', 'body', 'wide', 'tucked'].includes(c.facts.variant)) {
       const d = c.subjects[0], tH = c.keyMoment, b = c.ballAt(tH), j = d.jointsAt(tH);
       const arm = Math.min(segDist(b, j.shL, j.elL), segDist(b, j.elL, j.haL), segDist(b, j.shR, j.elR), segDist(b, j.elR, j.haR));
       if (c.facts.variant !== 'body' && arm > 0.06) bad(`handball#${seed} ball misses arm by ${arm.toFixed(2)}`);
@@ -54,10 +60,21 @@ for (const [name, gen] of Object.entries(GENERATORS)) {
       }
     }
     if (name === 'dive') {
-      if (c.facts.contact && c.facts.minGap > 0.12) bad(`dive#${seed} contact variant gap ${c.facts.minGap.toFixed(2)}`);
-      if (!c.facts.contact && c.facts.minGap < 0.25) bad(`dive#${seed} dive variant too close ${c.facts.minGap.toFixed(2)}`);
+      if (c.facts.contact && c.facts.minGap > 0.117) bad(`dive#${seed} contact variant gap ${c.facts.minGap.toFixed(2)}`);
+      if (!c.facts.contact && c.facts.minGap < (c.facts.tight ? 0.13 : 0.25)) bad(`dive#${seed} dive variant too close ${c.facts.minGap.toFixed(2)}`);
     }
-    if (name === 'tackle' && c.facts.variant !== 'clean') {
+    if (name === 'tackle' && (c.facts.variant === 'ballFirst' || c.facts.variant === 'manFirst')) {
+      const [att, def] = c.subjects, f = c.facts;
+      const dist = (t, leg) => { const j = def.jointsAt(t), ja = att.jointsAt(t); return Math.min(...[j.toL, j.toR, j.anL, j.anR].map((p) => Math.min(segDist(p, ja.knL, ja.anL), segDist(p, ja.knR, ja.anR)))); };
+      const bd = (t) => { const j = def.jointsAt(t), b = c.ballAt(t - 0.03); return Math.min(vec.dist(j.toL, b), vec.dist(j.toR, b), vec.dist(j.anL, b), vec.dist(j.anR, b)); };
+      if (dist(f.tMan) > 0.16) bad(`tackle#${seed} ${f.variant} leg contact missing ${dist(f.tMan).toFixed(2)}`);
+      if (bd(f.tBall) > 0.3) bad(`tackle#${seed} ${f.variant} ball contact missing ${bd(f.tBall).toFixed(2)}`);
+      if (Math.abs(f.tBall - f.tMan) * 30 < 1.5) bad(`tackle#${seed} ${f.variant} too few frames ${f.frames}`);
+      // before the first touch the boot is nowhere near the leg
+      const first = Math.min(f.tBall, f.tMan) - 0.2;
+      if (dist(first) < 0.2) bad(`tackle#${seed} ${f.variant} leg already contacted before the first touch`);
+    }
+    if (name === 'tackle' && !['clean', 'ballFirst', 'manFirst'].includes(c.facts.variant)) {
       const [att, def] = c.subjects, tC = c.keyMoment;
       const j = def.jointsAt(tC), ja = att.jointsAt(tC);
       const d = Math.min(...[j.toL, j.toR, j.anL, j.anR].map((p) => Math.min(segDist(p, ja.knL, ja.anL), segDist(p, ja.knR, ja.anR))));
@@ -77,12 +94,34 @@ for (const [name, gen] of Object.entries(GENERATORS)) {
     }
     if (name === 'penalty' && c.facts.variant.startsWith('keeper')) {
       const gk = c.subjects[0], j = gk.jointsAt(c.keyMoment);
-      const footOnLine = Math.max(...FEET.map((k) => j[k][0])) >= GOAL_X - 0.12 - 0.08;
+      const footOnLine = Math.max(...FEET.map((k) => j[k][0])) >= GOAL_X - 0.12;
       if (c.facts.variant === 'keeperEarly' && footOnLine) bad(`penalty#${seed} early keeper still on line`);
       if (c.facts.variant === 'keeperLegal' && !footOnLine) bad(`penalty#${seed} legal keeper off line`);
     }
   }
 }
+// Overtime: every generated tape builds, resolves under day-5 rules and explains itself
+import { buildCase, overtimeSpec } from '../src/cases.js';
+for (let seed = 1; seed <= 3; seed++) for (let n = 0; n < 20; n++) {
+  const st = { seed: seed * 104729, choices: {} };
+  try {
+    const c = buildCase(st, 5, n, overtimeSpec(st, n));
+    if (!c.truth.restart || !c.explain.length) bad(`overtime ${seed}/${n} ${c.gen} has no truth/explanation`);
+    if (c.explain.some((e) => /undefined|NaN/.test(e))) bad(`overtime ${seed}/${n} ${c.gen} explanation: ${c.explain.join(' | ')}`);
+    n2++;
+  } catch (e) { bad(`overtime ${seed}/${n} threw ${e.stack}`); }
+}
+// the campaign: every case of every day, a few seeds, with and without the bribes accepted
+import { DAYS } from '../src/story.js';
+for (const yes of [false, true]) for (let seed = 1; seed <= 4; seed++) DAYS.forEach((D, di) => D.cases.forEach((spec, ci) => {
+  const st = { seed: seed * 7727, choices: yes ? { bribe1: 'yes', bribe2: 'yes' } : {} };
+  try {
+    const c = buildCase(st, di + 1, ci);
+    n2++;
+    if (!c.explain.length || c.explain.some((e) => /undefined|NaN/.test(e))) bad(`day ${di + 1} case ${ci} ${c.gen}: ${c.explain.join(' | ')}`);
+    if (spec.opts && spec.opts.tight && !c.close) bad(`day ${di + 1} case ${ci} should be marked close`);
+  } catch (e) { bad(`day ${di + 1} case ${ci} threw ${e.stack}`); }
+}));
 console.log(Object.entries(counts).map(([k, v]) => `${k}=${v}`).join('  '));
-console.log(`${n} replays, ${fails} failures`);
+console.log(`${n} replays + ${n2} overtime tapes, ${fails} failures`);
 process.exit(fails ? 1 : 0);

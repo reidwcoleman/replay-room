@@ -163,15 +163,72 @@ export const TAPE = { W: 1024, H: 576, label: [362, 26, 300, 96], slots: [[86, 1
 
 export function drawTape(x, state, teams, hover = null) {
   const { W, H } = TAPE;
-  x.fillStyle = '#25282f'; x.fillRect(0, 0, W, H);
-  // moulded edges + reel windows
-  x.fillStyle = '#2d3139'; rr(x, 18, 18, W - 36, H - 36, 18); x.fill();
-  for (const cx of [262, 762]) {
-    x.fillStyle = '#16181d'; rr(x, cx - 150, 200, 300, 200, 26); x.fill();
-    x.fillStyle = '#3a3f4a'; x.beginPath(); x.arc(cx, 300, 70, 0, 7); x.fill();
-    x.fillStyle = '#1a1c21'; x.beginPath(); x.arc(cx, 300, 28, 0, 7); x.fill();
-    x.strokeStyle = '#4c5260'; x.lineWidth = 6;
-    for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; x.beginPath(); x.moveTo(cx + Math.cos(a) * 12, 300 + Math.sin(a) * 12); x.lineTo(cx + Math.cos(a) * 26, 300 + Math.sin(a) * 26); x.stroke(); }
+  const meta = state.meta || null;
+  // plastic shell with a vertical sheen
+  const gr = x.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, '#343944'); gr.addColorStop(0.5, '#262a33'); gr.addColorStop(1, '#1b1e25');
+  x.fillStyle = gr; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#2a2e38'; rr(x, 14, 14, W - 28, H - 28, 22); x.fill();
+  x.strokeStyle = 'rgba(255,255,255,0.09)'; x.lineWidth = 3; rr(x, 14, 14, W - 28, H - 28, 22); x.stroke();
+  x.strokeStyle = 'rgba(0,0,0,0.45)'; x.lineWidth = 3; rr(x, 22, 22, W - 44, H - 44, 18); x.stroke();
+  // moulded ribs and corner screws
+  x.fillStyle = 'rgba(0,0,0,0.28)';
+  for (let i = 0; i < 24; i++) { x.fillRect(150 + i * 30, H - 66, 12, 34); x.fillStyle = 'rgba(255,255,255,0.05)'; x.fillRect(162 + i * 30, H - 66, 2, 34); x.fillStyle = 'rgba(0,0,0,0.28)'; }
+  for (const [sx, sy] of [[48, 48], [W - 48, 48], [48, H - 48], [W - 48, H - 48]]) {
+    x.fillStyle = '#12141a'; x.beginPath(); x.arc(sx, sy, 12, 0, 7); x.fill();
+    x.strokeStyle = '#4a505e'; x.lineWidth = 3; x.beginPath(); x.moveTo(sx - 7, sy - 5); x.lineTo(sx + 7, sy + 5); x.stroke();
+  }
+  // reel windows: brown tape wound on white hubs behind smoked plastic
+  for (const [cx, wound] of [[262, 78], [762, 56]]) {
+    x.fillStyle = '#0c0d11'; rr(x, cx - 150, 196, 300, 208, 28); x.fill();
+    x.fillStyle = '#3b2a22'; x.beginPath(); x.arc(cx, 300, wound, 0, 7); x.fill();
+    x.fillStyle = '#54392b'; x.beginPath(); x.arc(cx, 300, wound - 8, 0, 7); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.08)'; x.beginPath(); x.arc(cx, 300, wound - 8, Math.PI * 1.1, Math.PI * 1.7); x.lineTo(cx, 300); x.fill();
+    x.fillStyle = '#e9e6dc'; x.beginPath(); x.arc(cx, 300, 34, 0, 7); x.fill();
+    x.fillStyle = '#1a1c21'; x.beginPath(); x.arc(cx, 300, 22, 0, 7); x.fill();
+    x.fillStyle = '#e9e6dc';
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; x.fillRect(cx + Math.cos(a) * 15 - 3, 300 + Math.sin(a) * 15 - 3, 6, 6); }
+    // glare across the window
+    const gl = x.createLinearGradient(cx - 150, 196, cx + 150, 404);
+    gl.addColorStop(0, 'rgba(255,255,255,0.10)'); gl.addColorStop(0.35, 'rgba(255,255,255,0.0)'); gl.addColorStop(1, 'rgba(255,255,255,0.04)');
+    x.fillStyle = gl; rr(x, cx - 150, 196, 300, 208, 28); x.fill();
+  }
+  // the tape itself crossing between the reels
+  x.fillStyle = '#4a3326'; x.fillRect(332, 340, 360, 6);
+  // bottom edge: write-protect tab, grade text, VHS plate
+  x.fillStyle = '#d8d3c4'; rr(x, 92, H - 112, 70, 26, 5); x.fill();
+  x.fillStyle = '#12141a'; x.fillRect(100, H - 106, 54, 14);
+  x.font = '700 22px Silkscreen, monospace'; x.textBaseline = 'middle'; x.textAlign = 'left';
+  x.fillStyle = 'rgba(230,226,212,0.75)'; x.fillText('E-180  HIGH GRADE', 196, H - 99);
+  x.fillStyle = '#f2f0e6'; rr(x, W - 252, H - 126, 160, 50, 6); x.fill();
+  x.fillStyle = '#c0392b'; x.fillRect(W - 252, H - 126, 160, 10);
+  x.font = 'italic 700 34px Silkscreen, sans-serif'; x.fillStyle = '#1a1c21'; x.textAlign = 'center';
+  x.fillText('VHS', W - 172, H - 94);
+  // scuffs
+  const sr = (() => { let q = 17; return () => ((q = (q * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff); })();
+  x.strokeStyle = 'rgba(255,255,255,0.07)'; x.lineWidth = 2;
+  for (let i = 0; i < 14; i++) { const sx = sr() * W, sy = sr() * H, l = 14 + sr() * 50; x.beginPath(); x.moveTo(sx, sy); x.lineTo(sx + l, sy + (sr() - 0.5) * 12); x.stroke(); }
+  // printed paper label across the top
+  const lg = x.createLinearGradient(0, 24, 0, 170);
+  lg.addColorStop(0, '#f3eedd'); lg.addColorStop(1, '#e2dcc6');
+  x.fillStyle = lg; rr(x, 104, 24, W - 208, 152, 10); x.fill();
+  x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 2; rr(x, 104, 24, W - 208, 152, 10); x.stroke();
+  const band = meta ? ['#2f6f9a', '#d8262f', '#2e8b57', '#f4a62a', '#7b3fe4'][(parseInt(meta.no, 10) || 1) % 5 - 0] || '#2f6f9a' : '#2f6f9a';
+  x.fillStyle = band; x.fillRect(104, 24, W - 208, 14);
+  x.fillStyle = 'rgba(255,255,255,0.35)'; for (let i = 0; i < W - 208; i += 22) x.fillRect(104 + i, 24, 10, 14);
+  x.textAlign = 'left'; x.textBaseline = 'middle';
+  x.fillStyle = '#16213a'; x.font = '700 18px Silkscreen, monospace'; x.fillText('LUMEN', 124, 62);
+  x.fillStyle = band; x.beginPath(); x.arc(240, 62, 7, 0, 7); x.fill();
+  if (meta) {
+    x.fillStyle = '#16213a'; x.font = '700 30px Silkscreen, monospace'; x.fillText(`TAPE ${meta.no}`, 124, 104);
+    x.font = '700 16px Silkscreen, monospace'; x.fillStyle = '#3a4258'; x.fillText(`${meta.a} v ${meta.b}  ${meta.minute}'`, 124, 140);
+    x.textAlign = 'right'; x.font = '700 14px Silkscreen, monospace'; x.fillStyle = '#6a6f80'; x.fillText(meta.kind.toUpperCase(), W - 124, 140);
+    if (meta.close) {
+      x.save(); x.translate(W - 190, 96); x.rotate(-0.12);
+      x.strokeStyle = '#c0392b'; x.lineWidth = 5; rr(x, -78, -34, 156, 68, 8); x.stroke();
+      x.fillStyle = '#c0392b'; x.textAlign = 'center'; x.font = '700 24px Silkscreen, monospace'; x.fillText('PHOTO', 0, -12); x.fillText('FINISH', 0, 16);
+      x.restore();
+    }
   }
   // paper label strip
   const [lx, ly, lw, lh] = TAPE.label;
@@ -180,7 +237,7 @@ export function drawTape(x, state, teams, hover = null) {
   else {
     rr(x, lx, ly, lw, lh, 14);
     x.setLineDash([10, 8]); x.lineWidth = 4; x.strokeStyle = hover === 'label' ? '#e8573f' : '#9a937e'; x.stroke(); x.setLineDash([]);
-    x.font = '800 22px Nunito, sans-serif'; x.fillStyle = hover === 'label' ? '#e8573f' : '#8a8470'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.font = '700 20px Silkscreen, monospace'; x.fillStyle = hover === 'label' ? '#e8573f' : '#8a8470'; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText('RESTART STICKER', lx + lw / 2, ly + lh / 2);
   }
   state.offences.forEach((st, i) => {

@@ -32,6 +32,7 @@ export const RULEBOOK = [
       'Ball first: if the challenger clearly plays the ball before any contact with the opponent, it is not an offence, even if the opponent falls afterwards.',
       'Man first: contact with the opponent before the ball (or with no ball at all) is a Foul. No card for a careless foul.',
       'Late: a challenge that arrives after the opponent has already released the ball is reckless. Foul + Yellow.',
+      'Order matters, even by a single frame: contact with the ball first is no offence, contact with the man first is a Foul. Frame-step the contact with , and . to see which comes first.',
       'Studs-up: a raised boot landing on the shin or above endangers safety. Foul + Red, even if the ball was touched.',
       'Restart: offence inside the penalty area → Penalty. Outside → Free kick.',
     ],
@@ -45,10 +46,19 @@ export const RULEBOOK = [
     update: { day: 4, body: 'DIRECTIVE 4 — League crackdown: Simulation now carries a Red card.' },
   },
   {
+    id: 'closecalls', from: 1, title: 'Photo finish',
+    body: [
+      'Tapes stamped PHOTO FINISH are decided by frames or centimetres. The crowd will be no help.',
+      'Slow the tape right down (↓), step single frames (, and .), scroll to zoom the monitor right in and use the cameras. Tactical for the lines, Goal-line for the goal and the keeper, Reverse for contact.',
+      'Calling a close one right is worth a bonus, and a run of good calls builds your streak.',
+    ],
+  },
+  {
     id: 'handball', from: 2, title: 'Handball',
     body: [
       'Defender: arm raised above shoulder level, or held away from the body and making it bigger → Handball. Restart Penalty if inside the area.',
       'Arm hanging by the side, close to the body → not an offence. Ball off the chest or shoulder → not an offence.',
+      'Measure it: an arm held more than 45° out from the body is making it bigger (offence). 45° or less is a natural position. Select the player and the tape shows the angle of each arm.',
       'Attacker: any handball by the scorer immediately before a goal → Disallow goal, even if accidental. No card.',
     ],
   },
@@ -79,9 +89,10 @@ export const RULEBOOK = [
   {
     id: 'penalties', from: 4, title: 'Penalty kicks',
     body: [
-      'At the moment of the kick the keeper must have at least part of one foot on or level with the goal line.',
+      'At the moment of the kick the keeper must have at least part of one foot on or level with the goal line. The line is 12 cm wide: a boot wholly in front of it is off the line.',
       'Keeper off the line and the kick is saved → Keeper off line + Yellow, Retake penalty. If the kick is scored, the goal stands.',
-      'An attacker who enters the penalty area before the kick and then scores the rebound → Encroachment, Disallow goal.',
+      'An attacker who enters the penalty area before the kick and then scores the rebound → Encroachment, Disallow goal. A boot over the painted area line counts as inside.',
+      'For lines in the goal-line view: press O to switch the measuring overlay on. It marks the outer edge of the goal line and the 12 cm band.',
     ],
   },
 ];

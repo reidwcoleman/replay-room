@@ -3,7 +3,7 @@
 // where the camera sits, and which paper is in front of you.
 import * as THREE from 'three';
 import { DAYS, ENDINGS, WAGE } from './story.js';
-import { buildCase } from './cases.js';
+import { buildCase, overtimeSpec } from './cases.js';
 import { Review, LABEL, richText } from './ui/review.js';
 import { h } from './ui/dom.js';
 import { drawTape } from './ui/stickers.js';
@@ -18,7 +18,11 @@ export function newState(seed = (Math.random() * 1e9) >>> 0) {
   return { seed, day: 1, caseIdx: 0, stage: 'inbox', wallet: 0, integrity: 100, flags: [], choices: {}, results: [], warnings: 0, bribes: 0, read: {}, ending: null };
 }
 export function loadState() { try { return JSON.parse(localStorage.getItem(SAVE)); } catch { return null; } }
-function saveState(s) { try { localStorage.setItem(SAVE, JSON.stringify(s)); } catch {} }
+function saveState(s) { if (s.arcade) return; try { localStorage.setItem(SAVE, JSON.stringify(s)); } catch {} }
+const BEST = 'replayroom.best.v1';
+export function loadBest() { try { return JSON.parse(localStorage.getItem(BEST)) || { score: 0, tapes: 0 }; } catch { return { score: 0, tapes: 0 }; } }
+function saveBest(b) { try { localStorage.setItem(BEST, JSON.stringify(b)); } catch {} }
+
 
 // A 480x360 canvas the main CRT shows when no replay is loaded.
 class IdleScreen {
@@ -91,6 +95,7 @@ export class App {
 
   _mainIdle(draw) {
     this.stage.setMainScreen(this.idle.tex, 360);
+    this.stage.H.main.screen.material.uniforms.vhs.value = 0;
     this.stage.power('main', 1);
     this.idle.draw = draw;
   }
@@ -128,6 +133,7 @@ export class App {
       h('div', 'title-actions', [
         h('button', 'btn primary big', { onclick: () => { this.sound.unlock(); this.sound.key(); this.start(newState()); } }, saved && !saved.ending ? 'New career' : 'Start shift one'),
         ...(saved && !saved.ending ? [h('button', 'btn big', { onclick: () => { this.sound.unlock(); this.sound.key(); this.start(saved); } }, `Continue · ${DAYS[saved.day - 1].name}`)] : []),
+        h('button', 'btn big ot', { onclick: () => { this.sound.unlock(); this.sound.key(); this.overtime(); } }, [h('span', '', 'Overtime'), loadBest().score ? h('small', '', `best ${loadBest().score}`) : '']),
       ]),
       h('p', 'title-foot', 'Mouse + keyboard. Headphones recommended.'),
     ]));
@@ -213,28 +219,83 @@ export class App {
 
   // ---------------- cases ----------------
   nextCase() {
-    const s = this.state, D = DAYS[s.day - 1];
+    const s = this.state, A = s.arcade, D = DAYS[s.day - 1];
     this._closeModal();
-    if (s.caseIdx >= D.cases.length) return this.shiftReport();
+    if (A && A.strikes >= 3) return this.overtimeOver();
+    if (!A && s.caseIdx >= D.cases.length) return this.shiftReport();
     this.mode = 'review';
     this._setScreen('review-screen', []);
     if (!this.review) this.review = new Review(this);
-    const c = buildCase(s, s.day, s.caseIdx);
+    const c = A ? buildCase(s, 5, A.n, overtimeSpec(s, A.n)) : buildCase(s, s.day, s.caseIdx);
     this.current = c;
     const shiftRes = s.shiftResults || [];
     this.review.load(c, {
       state: s,
-      caseNo: s.caseIdx + 1,
-      caseCount: D.cases.length,
-      shiftAvg: shiftRes.length ? Math.round(shiftRes.reduce((a, r) => a + r.score, 0) / shiftRes.length) : null,
+      arcade: A || null,
+      caseNo: A ? A.n + 1 : s.caseIdx + 1,
+      caseCount: A ? null : D.cases.length,
+      shiftAvg: !A && shiftRes.length ? Math.round(shiftRes.reduce((a, r) => a + r.score, 0) / shiftRes.length) : null,
       onSubmit: (r) => this.verdict(r),
       onMenu: () => this.menu(),
     });
     if (c.spec.tutorial && !this.fast) setTimeout(() => this.tutorial(), 2600);
   }
 
+  // ---------------- overtime (arcade) ----------------
+  overtime() {
+    const s = newState();
+    s.day = 5;
+    s.arcade = { n: 0, strikes: 0, score: 0, nailed: 0, bestStreak: 0 };
+    this.state = s;
+    this.mode = 'card';
+    this._closeModal();
+    this._teardownReview();
+    this._setScreen('daycard', []);
+    this.stage.goTo('focus', this.fast ? 0 : 1.2);
+    this.live.setBanner({ top: 'EXTRA TIME', main: 'OVERTIME' });
+    this.stage.setBigScreen(['EXTRA', 'TIME'], '#ffd23f', true);
+    this.term.text(['OVERTIME', '', 'THREE STRIKES', 'CLOSER EACH TAPE'], { cursor: true });
+    this._mainIdle((x, t) => {
+      txt(x, 'OVERTIME', 240, 110, 32, t % 0.6 < 0.45 || t > 1 ? '#ffd23f' : '#0b1210');
+      txt(x, 'THREE WRONG CALLS AND YOU ARE OUT', 240, 190, 8, '#7dff9a');
+      txt(x, 'EVERY TAPE CLOSER THAN THE LAST', 240, 210, 8, '#7dff9a');
+    });
+    this.sound.ping();
+    clearTimeout(this._cardT);
+    this._cardT = setTimeout(() => this.nextCase(), this.fast ? 0 : 2200);
+  }
+
+  overtimeOver() {
+    const s = this.state, A = s.arcade;
+    const best = loadBest();
+    const record = A.score > best.score;
+    if (record) saveBest({ score: A.score, tapes: A.n });
+    this.mode = 'ending';
+    this._teardownReview();
+    this._closeModal();
+    this.stage.goTo('title', this.fast ? 0 : 1.6);
+    this.term.text(['FULL TIME', '', `SCORE ${A.score}`, record ? 'NEW RECORD' : `BEST ${best.score}`]);
+    this._mainIdle((x) => { txt(x, 'FULL TIME', 240, 120, 32, '#c8ffd6'); txt(x, String(A.score), 240, 190, 32, '#ffd23f'); });
+    this.stage.setBigScreen(['FULL', 'TIME'], '#ffd23f', false);
+    this._setScreen('ending-screen', h('div', 'ending paper ot-over', [
+      h('small', 'eyebrow', 'Overtime · full time'),
+      h('h1', '', record ? 'New record' : 'Full time'),
+      h('p', 'ot-score', [h('b', '', String(A.score)), h('small', '', ' points')]),
+      h('div', 'end-stats', [
+        h('div', 'stat', [h('small', '', 'Tapes reviewed'), h('b', '', String(A.n))]),
+        h('div', 'stat', [h('small', '', 'Photo finishes nailed'), h('b', '', String(A.nailed))]),
+        h('div', 'stat', [h('small', '', 'Best streak'), h('b', '', `x${A.bestStreak}`)]),
+        h('div', 'stat', [h('small', '', 'Personal best'), h('b', '', String(Math.max(best.score, A.score)))]),
+      ]),
+      h('div', 'v-actions', [
+        h('button', 'btn', { onclick: () => { this.sound.key(); this.title(); } }, 'Back to title'),
+        h('button', 'btn primary big', { onclick: () => { this.sound.key(); this.overtime(); } }, 'Go again'),
+      ]),
+    ]));
+  }
+
   verdict({ result, decision, flagged, seconds }) {
-    const s = this.state, c = this.current;
+    const s = this.state, c = this.current, A = s.arcade;
     const lines = [...result.lines];
     let bonusNote = null;
     if (c.arbiter) {
@@ -248,20 +309,42 @@ export class App {
       s.bribes++;
       bonusNote = `K. transferred $${c.bribe.pay}.`;
     }
-    const r = { day: s.day, idx: s.caseIdx, gen: c.gen, score: result.score, restartOk: result.restartOk, seconds: Math.round(seconds) };
+    // streak: consecutive tapes at 85 or better. A photo finish called right pays extra.
+    const nailed = result.score >= 85;
+    const prevStreak = s.streak || 0;
+    s.streak = nailed ? prevStreak + 1 : 0;
+    s.bestStreak = Math.max(s.bestStreak || 0, s.streak);
+    const closeWin = !!(c.close && nailed && result.restartOk);
+    if (closeWin) { s.closeNailed = (s.closeNailed || 0) + 1; if (!A) s.shiftBonus = (s.shiftBonus || 0) + 50; }
+    let gain = 0;
+    if (A) {
+      gain = Math.round(result.score * (1 + 0.25 * Math.min(8, nailed ? prevStreak : 0))) + (closeWin ? 100 : 0);
+      A.score += gain; A.n++;
+      if (!result.restartOk || result.score < 55) A.strikes++;
+      if (closeWin) A.nailed++;
+      A.bestStreak = Math.max(A.bestStreak, s.streak);
+    }
+    const r = { day: s.day, idx: s.caseIdx, gen: c.gen, score: result.score, restartOk: result.restartOk, seconds: Math.round(seconds), close: !!c.close };
     s.results.push(r);
     (s.shiftResults = s.shiftResults || []).push(r);
     s.caseIdx++;
     saveState(s);
     const D = DAYS[s.day - 1];
     const done = s.shiftResults.reduce((a, q) => a + Math.round(q.score / 10), 0);
-    this.term.idle({ title: 'SHIFT QUOTA', done, quota: D.cases.length * 7, sub: s.caseIdx >= D.cases.length ? 'SHIFT COMPLETE' : 'INSERT NEXT TAPE', blinkSub: true });
+    if (A) this.term.text(['OVERTIME', '', `SCORE ${A.score}`, `STRIKES ${A.strikes}/3`]);
+    else this.term.idle({ title: 'SHIFT QUOTA', done, quota: D.cases.length * 7, sub: s.caseIdx >= D.cases.length ? 'SHIFT COMPLETE' : 'INSERT NEXT TAPE', blinkSub: true });
     const grade = result.score >= 85 ? ['Correct call', 'good'] : result.score >= 55 ? ['Partly right', 'mid'] : ['Wrong call', 'bad'];
     const truth = c.truth;
     this.stage.goTo('report', this.fast ? 0 : 0.8);
+    const last = A ? A.strikes >= 3 : s.caseIdx >= D.cases.length;
     this._openModal(h('div', 'verdict paper ' + grade[1], [
-      h('div', 'v-head', [h('small', '', `Review report · Tape ${c.day}-${String(c.idx + 1).padStart(2, '0')} · ${LABEL[c.gen]}`), h('div', 'v-score', [h('b', '', String(result.score)), h('small', '', '/ 100')])]),
+      h('div', 'v-head', [h('small', '', `Review report · Tape ${c.day}-${String(c.idx + 1).padStart(2, '0')} · ${LABEL[c.gen]}${c.close ? ' · Photo finish' : ''}`), h('div', 'v-score', [h('b', '', String(result.score)), h('small', '', '/ 100')])]),
       h('div', 'stamp ' + grade[1], grade[0]),
+      ...(s.streak >= 2 || closeWin || A ? [h('div', 'v-combo', [
+        ...(s.streak >= 2 ? [h('span', 'chip streak', [h('small', '', 'Streak'), h('b', '', `x${s.streak}`)])] : []),
+        ...(closeWin ? [h('span', 'chip close', [h('small', '', 'Photo finish'), h('b', '', A ? '+100' : '+$50')])] : []),
+        ...(A ? [h('span', 'chip pts', [h('small', '', 'Overtime'), h('b', '', `+${gain}`)]), h('span', 'chip strikes', [h('small', '', 'Strikes'), h('b', '', '●'.repeat(A.strikes) + '○'.repeat(3 - A.strikes))])] : []),
+      ])] : []),
       h('div', 'v-truth', [
         h('small', '', 'The correct call'),
         h('b', '', truth.restart),
@@ -272,10 +355,11 @@ export class App {
       ...(bonusNote ? [h('p', 'v-bribe', bonusNote)] : []),
       h('div', 'v-actions', [
         h('button', 'btn', { onclick: () => { this._closeModal(); this.review.cueKeyMoment(); this._watchBar(); } }, 'Watch the key moment'),
-        h('button', 'btn primary', { onclick: () => { this.sound.key(); this._closeModal(); this.nextCase(); } }, s.caseIdx >= D.cases.length ? 'Finish shift →' : 'Next tape →'),
+        h('button', 'btn primary', { onclick: () => { this.sound.key(); this._closeModal(); this.nextCase(); } }, A ? (last ? 'Full time →' : 'Next tape →') : last ? 'Finish shift →' : 'Next tape →'),
       ]),
     ]), 'side');
     this.sound.paper();
+    if (s.streak >= 2) setTimeout(() => this.sound.streak(s.streak), 1100);
   }
 
   _watchBar() {
@@ -293,14 +377,16 @@ export class App {
     this.stage.resetTape();
     const res = s.shiftResults || [];
     const avg = res.length ? Math.round(res.reduce((a, r) => a + r.score, 0) / res.length) : 0;
-    const bonus = Math.round(avg * 1.2);
-    s.wallet += WAGE + bonus;
+    const bonus = Math.round(avg * 1.2), extra = s.shiftBonus || 0;
+    s.wallet += WAGE + bonus + extra;
+    s.shiftBonus = 0;
     let note;
     if (avg >= 85) note = 'Excellent shift. Exactly the standard we need. — M.H.';
     else if (avg >= 65) note = 'Solid. Tighten up the close ones. — M.H.';
     else if (avg >= 45) note = 'Below standard. Read the rulebook before tomorrow. — M.H.';
     else { s.warnings++; note = s.warnings >= 2 ? 'This is your second failed shift.' : 'Formal warning: one more shift like this and your contract ends. — M.H.'; }
     const fired = s.warnings >= 2;
+    const rank = avg >= 95 ? 'S' : avg >= 85 ? 'A' : avg >= 70 ? 'B' : avg >= 55 ? 'C' : 'D';
     s.stage = 'inbox';
     s.caseIdx = 0;
     const lastDay = s.day >= DAYS.length;
@@ -310,12 +396,13 @@ export class App {
     this._mainIdle((x) => { txt(x, 'END OF SHIFT', 240, 120, 32, '#c8ffd6'); txt(x, `${res.length} TAPES REVIEWED`, 240, 200, 16, '#7dff9a'); });
     this._openModal(h('div', 'report paper', [
       h('small', 'eyebrow', `${D.name} · Shift report`),
+      h('div', 'rank r-' + rank, [h('small', '', 'Rank'), h('b', '', rank)]),
       h('h2', '', `Accuracy ${avg}%`),
       h('table', '', [
         h('thead', '', h('tr', '', [h('th', '', 'Tape'), h('th', '', 'Type'), h('th', '', 'Time'), h('th', '', 'Score')])),
         h('tbody', '', res.map((r, i) => h('tr', '', [h('td', '', String(i + 1)), h('td', '', LABEL[r.gen]), h('td', '', `${r.seconds}s`), h('td', r.score >= 85 ? 'g' : r.score >= 55 ? 'm' : 'b', String(r.score))]))),
       ]),
-      h('div', 'pay', [h('span', '', `Base $${WAGE} + accuracy bonus $${bonus}`), h('b', '', `$${s.wallet.toLocaleString()}`)]),
+      h('div', 'pay', [h('span', '', `Base $${WAGE} + accuracy $${bonus}${extra ? ` + photo finishes $${extra}` : ''}`), h('b', '', `$${s.wallet.toLocaleString()}`)]),
       h('p', 'note', note),
       h('button', 'btn primary big', { onclick: () => {
         this.sound.key();
@@ -382,6 +469,7 @@ export class App {
   menu() {
     this._openModal(h('div', 'menu paper', [
       h('h2', '', 'Paused'),
+      h('label', 'vol', ['Music', (() => { const b = h('input', '', { type: 'checkbox' }); b.checked = this.sound.musicOn; b.onchange = () => this.sound.setMusic(b.checked); return b; })()]),
       h('label', 'vol', ['Volume', (() => { const r = h('input', '', { type: 'range', min: 0, max: 1, step: 0.05 }); r.value = this.sound.vol; r.oninput = () => this.sound.setVolume(+r.value); return r; })()]),
       h('div', 'keys', [
         ['Space', 'Play / pause'], [', .  or ← →', 'Step a frame (Shift = 10)'], ['↑ ↓', 'Playback speed'], ['1–6 / C', 'Cameras'], ['Scroll / drag', 'Zoom / pan the replay'], ['Click player', 'Select (their shirt is marked in Match)'], ['O', 'Offside line tool'], ['Z', 'Reset zoom'], ['Q W E', 'Desk / monitor / tape'], ['Enter', 'Send the tape'],

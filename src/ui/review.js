@@ -7,11 +7,20 @@ import { rulebookFor } from '../sim/rules.js';
 import { judge } from '../sim/judge.js';
 import { TYPES_BY_DAY, RESTARTS_BY_DAY } from '../cases.js';
 import { h, hex } from './dom.js';
+import { drawOSD } from './osd.js';
 import { drawTape, tapeHit, drawShirt, drawCardHand, drawOffenceIcon, drawRestartIcon } from './stickers.js';
 
 const SPEEDS = [0.1, 0.25, 0.5, 1];
 const OSD_W = 480, OSD_H = 360;
 const QUESTION = { tackle: 'POSSIBLE FOUL', dive: 'POSSIBLE PENALTY', handball: 'POSSIBLE HANDBALL', offside: 'CHECKING OFFSIDE', goalLine: 'GOAL-LINE CHECK', penalty: 'PENALTY CHECK' };
+const HINT = {
+  tackle: 'Dee: step frame by frame with <b>,</b> and <b>.</b>. Which does the boot reach first, the ball or the leg?',
+  dive: 'Dee: zoom right in on the contact frame. Is there any daylight between his boot and the leg?',
+  handball: 'Dee: click the player. The tape shows each arm\'s angle from the body. Over <b>45°</b> is an offence.',
+  offside: 'Dee: press <b>O</b>, then click the attacker and the last defender on the pass frame. It reads out the centimetres.',
+  goalLine: 'Dee: goal-line cam is <b>5</b>. Press <b>O</b> for the measuring overlay, then find the deepest frame.',
+  penalty: 'Dee: goal-line cam (<b>5</b>) and <b>O</b> mark the line. Is the keeper\'s rear boot on it? Is anyone over the area line?',
+};
 const LABEL = { tackle: 'Challenge', dive: 'Penalty appeal', handball: 'Handball', offside: 'Offside', goalLine: 'Goal-line', penalty: 'Penalty kick' };
 
 export class Review {
@@ -79,6 +88,10 @@ export class Review {
     this.speed = 0.5;
     this.tab = 'actions';
     this.nextNag = 22;
+    this.lower = 7;          // the question lower-third lingers for a few seconds
+    this._hinted = false;
+    this._slowMul = 1;
+    this.cine = { on: !this.app.fast };
     const k = c.clip.context;
     this.teams = { A: k.attack, D: k.defend };
     this.stage.resetTape();
@@ -103,6 +116,7 @@ export class Review {
     this.stage.power('main', 0);
     this._powerT = 0;
     this.sound.tapeIn();
+    if (c.close && !this.app.fast) setTimeout(() => this.sound.sting(), 900);
     clearTimeout(this._startTimer);
     this._startTimer = setTimeout(() => { if (this.case === c && !this.locked) { this.setMode('focus'); this.play(true); } }, fast ? 0 : 1800);
   }
@@ -130,22 +144,33 @@ export class Review {
     if (this.card) { this.card.t += dt; if (this.card.t > this.card.dur) this.card = null; }
     if (this.playing) {
       const prev = this.t;
-      let t = this.t + dt * this.speed;
+      let t = this.t + dt * this.speed * this._cineMul();
       if (t >= this.case.clip.duration) { t = this.case.clip.duration; this.playing = false; }
       this._cues(prev, t);
       this._seek(t);
-    }
+      this._cineCam();
+    } else this._slowMul = 1;
+    // slow-mo audio: a downward sweep, a heartbeat while it crawls, an upward sweep when it ends
+    const crawling = this._slowMul < 0.6;
+    if (crawling && !this._crawl) this.sound.slowIn();
+    if (!crawling && this._crawl) this.sound.slowOut();
+    if (crawling) { this._beat = (this._beat || 0) - dt; if (this._beat <= 0) { this._beat = 0.62; this.sound.thump(); } }
+    this._crawl = crawling;
+    if (this.lower > 0 && !this.card) this.lower -= dt;
     const pressure = Math.min(1, this.caseTime / 100);
     if (!this.locked) {
       this.view.excite = 0.2 + pressure * 0.8;
       this.live.excite = 0.15 + pressure * 0.85;
       this.stage.crowdHeat = this.live.excite;
       this.sound.crowdLevel(0.15 + pressure * 0.7);
+      if (this.case.close && !this._hinted && this.caseTime > 32) { this._hinted = true; this.bubble(HINT[this.case.gen] || 'Take your time. Zoom in.', 'term', 6.5); }
       if (this.caseTime > this.nextNag) { this.nextNag += 18 + Math.random() * 10; this._nag(pressure); }
       this.term.review({ caseNo: this.ctx.caseNo, caseCount: this.ctx.caseCount, seconds: this.caseTime, pressure, question: this.case.clip.context.question, onField: this.case.clip.context.onField, arbiter: this.case.arbiter, flagged: this.flagged });
     }
     this.static = Math.max(0, this.static - dt * 3);
     this.stage.H.main.screen.material.uniforms.noise.value = this.static;
+    // a paused VHS shakes: jitter, tracking tear and colour smear
+    this.stage.H.main.screen.material.uniforms.vhs.value = this.card ? 0.55 : 0.4 + (this.playing ? 0 : 0.35) + this.static * 0.4;
     this._drawOSD();
     this.view.render(dt, this.osd.tex);
     this._tickHud();
@@ -171,83 +196,51 @@ export class Review {
     this.view.setTime(this.t);
     this.stage.setRail(this.t / this.case.clip.duration);
   }
+  // First watch: the tape crawls and the camera pushes in on the incident. Any input hands control back.
+  _cineOff() { if (this.cine) this.cine.on = false; }
+  _cineMul() {
+    const key = this.case.clip.keyMoment;
+    if (!this.cine.on || key == null) return (this._slowMul = 1);
+    const q = Math.max(0, Math.min(1, (Math.abs(this.t - key) - 0.3) / 0.7));
+    return (this._slowMul = 0.3 + 0.7 * q * q * (3 - 2 * q));
+  }
+  _cineCam() {
+    if (!this.cine.on || this.view.cam !== 'broadcast') { this.cine.on = false; return; }
+    const c = this.case, key = c.clip.keyMoment, d = Math.abs(this.t - key);
+    if (this.t > key + 2.4) { this.cine.on = false; this.view.resetView(); return; }
+    const q = Math.max(0, Math.min(1, (d - 0.5) / 1.4)), w = 1 - q * q * (3 - 2 * q);
+    const Z = { tackle: 3, dive: 3, handball: 2.8, offside: 1.8, goalLine: 2.4, penalty: 1.7 }[c.gen] || 2;
+    const subs = c.clip.subjects || [];
+    let p;
+    if (c.gen === 'goalLine' || !subs.length) p = c.clip.ballAt(this.t);
+    else { p = [0, 0, 0]; for (const a of subs) { const q2 = a.jointsAt(this.t).pelvis; p[0] += q2[0] / subs.length; p[1] += q2[1] / subs.length; p[2] += q2[2] / subs.length; } }
+    this.view.focusOn(p, 1 + (Z - 1) * w);
+    this.view.pan.multiplyScalar(w);
+  }
   play(force) {
     if (force === true) this.playing = true;
-    else this.playing = !this.playing;
+    else { this.playing = !this.playing; this._cineOff(); }
     if (this.playing && this.t >= this.case.clip.duration - 0.01) this._seek(0);
   }
-  step(frames) { this.playing = false; this._seek(Math.round(this.t * FPS + frames) / FPS); }
-  _setCam(id) { this.view.setCam(id); this.static = 0.9; this.sound.blip(); }
+  step(frames) { this._cineOff(); this.playing = false; this._seek(Math.round(this.t * FPS + frames) / FPS); }
+  _setCam(id) { this._cineOff(); this.view.setCam(id); this.static = 0.9; this.sound.blip(); }
   _cycleCam() { const i = CAMS.findIndex((c) => c.id === this.view.cam); this._setCam(CAMS[(i + 1) % CAMS.length].id); }
   _toggleLines() {
+    this._cineOff();
     if (this.case.day < 3) { this.bubble('The line tool unlocks on day 3.', 'term', 2.2); return; }
     this.view.lineMode = !this.view.lineMode;
     this.sound.blip();
   }
-  _speed(d) { const i = SPEEDS.indexOf(this.speed); this.speed = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, i + d))]; this.sound.blip(); }
+  _speed(d) { this._cineOff(); const i = SPEEDS.indexOf(this.speed); this.speed = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, i + d))]; this.sound.blip(); }
 
   // ---------- on-screen display (drawn into the replay feed) ----------
   _drawOSD() {
-    const x = this.osd.ctx, W = OSD_W, H = OSD_H, v = this.view, c = this.case;
-    x.clearRect(0, 0, W, H);
-    x.textBaseline = 'top';
-    const txt = (s, X, Y, size = 8, col = '#fff', align = 'left', bg = null) => {
-      x.font = `${size}px Silkscreen`; x.textAlign = align;
-      if (bg) { const w = x.measureText(s).width; const bx = align === 'right' ? X - w - 4 : align === 'center' ? X - w / 2 - 4 : X - 4; x.fillStyle = bg; x.fillRect(Math.round(bx), Y - 3, Math.round(w + 8), size + 5); }
-      x.fillStyle = col; x.fillText(s, X, Y);
-    };
-    // player tags
-    const tags = [];
-    if (v.selected) tags.push({ a: v.selected.actor, col: '#7dff9a' });
-    for (const l of v.lines) if (l.pm !== v.selected) tags.push({ a: l.pm.actor, col: l.pm.actor.team === 'A' ? '#ff5d8f' : '#5fd4ff' });
-    if (v.hover && v.hover !== v.selected && !v.lines.some((l) => l.pm === v.hover)) tags.push({ a: v.hover.actor, col: '#ffffff' });
-    for (const tg of tags) {
-      const p = v.screenOf(tg.a);
-      if (!p.visible) continue;
-      const s = `#${tg.a.num} ${this.teams[tg.a.team].short}`;
-      x.font = '8px Silkscreen';
-      const w = Math.round(x.measureText(s).width + 8), X = Math.round(p.x - w / 2), Y = Math.round(p.y - 14);
-      x.fillStyle = 'rgba(10,14,20,0.85)'; x.fillRect(X, Y, w, 12);
-      x.fillStyle = tg.col; x.fillRect(X, Y + 11, w, 1); x.fillRect(Math.round(p.x) - 1, Y + 12, 2, 3);
-      x.textAlign = 'left'; x.fillText(s, X + 4, Y + 1);
-    }
-    // corners
-    const blink = Math.floor(performance.now() / 500) % 2 === 0;
-    txt(this.playing ? `PLAY ${this.speed}X` : 'PAUSE', 40, 26, 16, '#ffffff', 'left', 'rgba(10,14,20,0.6)');
-    if (this.playing && blink) { x.fillStyle = '#ff4d4d'; x.fillRect(26, 31, 6, 6); }
-    const cam = CAMS.find((q) => q.id === v.cam);
-    txt(`CAM ${CAMS.indexOf(cam) + 1} ${cam.label.toUpperCase()}${v.zoom > 1.05 ? ` ${v.zoom.toFixed(1)}X` : ''}`, W - 30, 30, 8, '#ffffff', 'right', 'rgba(10,14,20,0.6)');
-    const fr = Math.round(this.t * FPS);
-    txt(`${fmt(this.t)}  F${String(fr).padStart(3, '0')}`, 30, H - 34, 8, '#ffffff', 'left', 'rgba(10,14,20,0.6)');
-    const k = c.clip.context;
-    txt(`${k.attack.short} ${k.score[0]}-${k.score[1]} ${k.defend.short}  ${matchClock(k.minute, this.t)}`, W - 30, H - 34, 8, '#ffffff', 'right', 'rgba(10,14,20,0.6)');
-    // offside readout
-    const info = v.lineInfo();
-    if (info.length) {
-      const att = info.find((i) => i.actor.team === 'A'), def = info.find((i) => i.actor.team === 'D');
-      let s = info.map((i) => `#${i.actor.num} ${this.teams[i.actor.team].short}`).join(' VS ');
-      if (att && def) {
-        const d = att.x - def.x, cm = Math.round(Math.abs(d) * 100);
-        s += d > 0.005 ? `  ATTACKER ${cm}CM BEYOND` : d < -0.005 ? `  ATTACKER ${cm}CM BEHIND` : '  LEVEL';
-      }
-      txt(s, W / 2, H - 58, 8, '#ffe066', 'center', 'rgba(10,14,20,0.8)');
-    }
-    if (v.lineMode) txt('LINE TOOL: CLICK A PLAYER', W / 2, 52, 8, blink ? '#ffe066' : '#c9a83a', 'center', 'rgba(10,14,20,0.7)');
-    if (this.watchKey) txt('KEY MOMENT', W / 2, 52, 8, '#7dff9a', 'center', 'rgba(10,14,20,0.7)');
-    // title card while the tape loads
-    if (this.card) {
-      const a = Math.min(1, (this.card.dur - this.card.t) / 0.4);
-      x.globalAlpha = Math.max(0, a);
-      x.fillStyle = '#0a0f14'; x.fillRect(0, 0, W, H);
-      txt(`TAPE ${c.day}-${String(c.idx + 1).padStart(2, '0')}`, W / 2, 80, 16, '#7dff9a', 'center');
-      txt(LABEL[c.gen].toUpperCase(), W / 2, 112, 16, '#ffffff', 'center');
-      txt(k.attack.name.toUpperCase(), W / 2, 166, 8, '#ffffff', 'center');
-      txt('VS', W / 2, 184, 8, '#8a95a5', 'center');
-      txt(k.defend.name.toUpperCase(), W / 2, 202, 8, '#ffffff', 'center');
-      txt(`${k.minute}'  ON-FIELD: ${k.onField.toUpperCase()}`, W / 2, 240, 8, '#ffe066', 'center');
-      if (blink) txt('LOADING TAPE', W / 2, 292, 8, '#7dff9a', 'center');
-      x.globalAlpha = 1;
-    }
+    const slow = this._slowMul || 1;
+    drawOSD(this.osd.ctx, {
+      view: this.view, case: this.case, teams: this.teams, t: this.t, playing: this.playing, speed: this.speed, slow,
+      caseTime: this.caseTime, card: this.card, watchKey: this.watchKey, label: LABEL[this.case.gen],
+      lower: this.lower > 0 ? Math.min(1, (7 - this.lower) / 0.35, this.lower / 0.4) : 0,
+    });
     this.osd.tex.needsUpdate = true;
   }
 
@@ -258,13 +251,16 @@ export class Review {
     this.hud.className = 'hud';
     const chip = (t) => h('span', 'chip', [h('i', '', { style: `background:${hex(t.shirt)};box-shadow: inset -5px 0 0 ${hex(t.shorts)}` }), t.short]);
     this.slip = h('div', 'slip', [
-      h('div', 'slip-top', [h('b', '', `Tape ${c.day}-${String(c.idx + 1).padStart(2, '0')}`), h('span', '', `${this.ctx.caseNo} of ${this.ctx.caseCount}`)]),
+      h('div', 'slip-top', [h('b', '', `Tape ${c.day}-${String(c.idx + 1).padStart(2, '0')}`), h('span', '', this.ctx.caseCount ? `${this.ctx.caseNo} of ${this.ctx.caseCount}` : `Overtime · ${this.ctx.caseNo}`)]),
       h('div', 'slip-match', [chip(k.attack), h('b', 'sc', `${k.score[0]}–${k.score[1]}`), chip(k.defend), h('span', 'min', `${k.minute}'`)]),
       h('p', 'slip-q', k.question),
       h('div', 'slip-field', [h('small', '', 'On-field call'), h('b', '', k.onField)]),
     ]);
     this.top = h('div', 'topright', [
-      h('div', 'pill', [h('small', '', 'Wallet'), h('b', '', `$${s.wallet.toLocaleString()}`)]),
+      ...(this.ctx.arcade
+        ? [h('div', 'pill', [h('small', '', 'Score'), h('b', '', String(this.ctx.arcade.score))]), h('div', 'pill', [h('small', '', 'Strikes'), h('b', '', '●'.repeat(this.ctx.arcade.strikes) + '○'.repeat(3 - this.ctx.arcade.strikes))])]
+        : [h('div', 'pill', [h('small', '', 'Wallet'), h('b', '', `$${s.wallet.toLocaleString()}`)])]),
+      ...(s.streak >= 2 ? [h('div', 'pill streak', [h('small', '', 'Streak'), h('b', '', `x${s.streak}`)])] : []),
       ...(this.ctx.shiftAvg != null ? [h('div', 'pill', [h('small', '', 'Shift'), h('b', '', `${this.ctx.shiftAvg}%`)])] : []),
       h('button', 'btn ghost', { onclick: () => this.ctx.onMenu() }, 'Menu'),
     ]);
@@ -345,11 +341,13 @@ export class Review {
     if (id === 'zoom') this.view.resetView();
   }
   _onRail(f, phase) {
+    this._cineOff();
     if (phase === 'down') { this.playing = false; this.sound.key(); }
     this._seek(f * this.case.clip.duration);
   }
   _onScreen(type, u, v, e) {
     const V = this.view;
+    if (type === 'wheel' || type === 'down') this._cineOff();
     if (type === 'wheel') V.wheel(u, v, e.deltaY);
     if (type === 'down') V.pointerDown(u, v, e.button);
     if (type === 'move') { V.pointerMove(u, v, e.shiftKey); this.stage.canvas.style.cursor = V.cursor; }
@@ -498,7 +496,8 @@ export class Review {
 
   _drawTape(hover = null) {
     const T = this.stage.H.tapeTex;
-    drawTape(T.userData.ctx, { restart: this.decision.restart, offences: this.decision.entries }, this.teams, hover);
+    const c = this.case, k = c.clip.context;
+    drawTape(T.userData.ctx, { restart: this.decision.restart, offences: this.decision.entries, meta: { no: `${c.day}-${String(c.idx + 1).padStart(2, '0')}`, a: k.attack.short, b: k.defend.short, minute: k.minute, kind: LABEL[c.gen], close: c.close } }, this.teams, hover);
     T.needsUpdate = true;
   }
 
@@ -603,6 +602,7 @@ export class Review {
   // jump to the key moment after the verdict
   cueKeyMoment() {
     const c = this.case.clip;
+    this._cineOff();
     this.setMode('focus', true);
     this.hud.classList.add('watching');
     this.watchKey = true;

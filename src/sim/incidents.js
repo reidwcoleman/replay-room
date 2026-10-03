@@ -2,7 +2,7 @@
 // the facts (contact order, offside margin, arm position…) and resolves the correct call from
 // whatever rulebook is in force that day.
 import { Clip, BALL_R, GOAL_X, BOX_X, BOX_HALF_W, GOAL_HALF_W } from './clip.js';
-import { joints, SCORING, segDist, vec } from './kinematics.js';
+import { joints, SCORING, FEET, segDist, vec } from './kinematics.js';
 import { TEAMS } from './teams.js';
 
 export const TYPES = ['Foul', 'Handball', 'Offside', 'Simulation', 'Violent conduct', 'Keeper off line', 'Encroachment'];
@@ -25,6 +25,7 @@ export function rng(seed) {
 }
 
 const fr = (t) => Math.round(t * 30) / 30;
+export const CONTACT_R = 0.117; // two limb radii: closer than this and the capsules touch
 const inBox = (x, z) => x > BOX_X && Math.abs(z) < BOX_HALF_W;
 const clockOf = (minute, t) => {
   const s = Math.floor(minute * 60 + t);
@@ -138,7 +139,7 @@ function finish(clip, R, focus) {
 // ---------------------------------------------------------------------------------------------
 export function tackle(R, o = {}) {
   const box = o.box ?? R() < 0.55;
-  const variant = o.variant || R.pick(['clean', 'foul', 'late', 'studs', 'foul', 'clean']);
+  const variant = o.variant || R.pick(o.tight ? ['ballFirst', 'manFirst', 'late', 'ballFirst', 'manFirst'] : ['clean', 'foul', 'late', 'studs', 'foul', 'clean']);
   const clip = setup(R, { duration: 8.5, defLine: box ? 40 : 30, ...o });
   const side = R.sign();
   const xc = box ? R.range(41, 45) : R.range(24, 30), zc = box ? R.range(-8, 8) : R.range(-14, 14);
@@ -160,7 +161,7 @@ export function tackle(R, o = {}) {
 
   if (variant === 'late') {
     // attacker releases a pass, the challenge arrives afterwards
-    const tP = tC - R.range(0.65, 0.85);
+    const tP = tC - (o.tight ? R.range(0.1, 0.2) : R.range(0.65, 0.85));
     dribble(clip, att, 0.15, tP - 0.02, 4, 0.55);
     const mate = clip.find('A', att.num === 10 ? 8 : 10); mate.key = true;
     const recv = [xc + R.range(-2, 3), zc - side * R.range(10, 14)];
@@ -173,13 +174,33 @@ export function tackle(R, o = {}) {
     def.slide(tC - 0.32, 0.32, 0.9, leg);
     clip.note(tP, `Pass ${tag(clip, att)} → ${tag(clip, mate)}`);
   } else {
-    dribble(clip, att, 0.15, tC - (variant === 'foul' ? 0.3 : 0.05), 5, variant === 'foul' ? 1.6 : 0.85);
+    dribble(clip, att, 0.15, tC - (variant === 'foul' ? 0.3 : 0.05), 5, variant === 'foul' ? 1.6 : variant === 'ballFirst' || variant === 'manFirst' ? 0.4 : 0.85);
     if (variant === 'studs') def.raise(tC - 0.28, 0.24, 0.35, leg, 0.62);
     else def.slide(tC - 0.32, 0.32, 0.9, leg);
   }
   // aim the defender's boot: at the ball (clean) or at the attacker's standing leg (fouls)
   const tgtLeg = (j) => (side > 0 ? j.anL : j.anR);
-  if (variant === 'clean') {
+  if (variant === 'ballFirst' || variant === 'manFirst') {
+    // Both the ball and the standing leg get hit by the same sliding boot, a few frames apart.
+    // Whichever comes first decides the call, so the only way to know is to frame-step.
+    const frames = o.frames ?? R.pick([2, 3, 3, 4]);
+    const dF = frames / 30;
+    const tB = variant === 'ballFirst' ? tC : fr(tC + dF), tL = variant === 'ballFirst' ? fr(tC + dF) : tC;
+    const b = clip.ballAt(tC - 0.05);
+    ballEnd = [xc + R.range(4, 8), BALL_R, zc - side * R.range(8, 14)];
+    clip.ball({ t0: tB, t1: tB + 1.5, p0: b, p1: ballEnd, roll: true });
+    aim(clip, def, tB, (j) => (leg > 0 ? j.toR : j.toL), b, tC - 0.9);
+    def.bake();
+    const boot = (leg > 0 ? def.jointsAt(tL).toR : def.jointsAt(tL).toL);
+    // the point on the attacker's shin that sits at the boot's height, on whichever leg is nearer
+    const shinAt = (j) => [[j.anL, j.knL], [j.anR, j.knR]].map(([a, k]) => { const u = Math.max(0, Math.min(1, (boot[1] - a[1]) / ((k[1] - a[1]) || 1))); return vec.add(a, vec.scale(vec.sub(k, a), u)); }).reduce((m, q) => (vec.dist(q, boot) < vec.dist(m, boot) ? q : m));
+    aim(clip, att, tL, shinAt, boot, tC - 0.9);
+    att.fall(tL + 0.04, 1, 0.55, tC + 2.8);
+    att.bake();
+    facts.frames = frames; facts.tBall = tB; facts.tMan = tL;
+    clip.note(tC, `Challenge ${tag(clip, def)} on ${tag(clip, att)}`);
+    clip.note(tL + 0.7, `${tag(clip, att)} down`, 'warn');
+  } else if (variant === 'clean') {
     const b = clip.ballAt(tC - 0.05);
     ballEnd = [xc + R.range(4, 8), BALL_R, zc - side * R.range(8, 14)];
     clip.ball({ t0: tC, t1: tC + 1.5, p0: b, p1: ballEnd, roll: true });
@@ -210,10 +231,10 @@ export function tackle(R, o = {}) {
   }
   const ctx = clip.context;
   ctx.question = facts.box ? 'Possible penalty — check the challenge' : 'Check the challenge';
-  ctx.onField = R.pick(variant === 'clean' ? ['Play on', 'Play on', facts.box ? 'Penalty' : 'Free kick'] : ['Play on', facts.box ? 'Penalty' : 'Free kick']);
+  ctx.onField = R.pick(variant === 'clean' || variant === 'ballFirst' ? ['Play on', 'Play on', facts.box ? 'Penalty' : 'Free kick'] : ['Play on', facts.box ? 'Penalty' : 'Free kick']);
   clip.facts = facts;
   clip.resolve = (rules) => {
-    if (variant === 'clean') return { infringements: [], restart: 'Play on' };
+    if (variant === 'clean' || variant === 'ballFirst') return { infringements: [], restart: 'Play on' };
     const card = variant === 'late' ? 'Yellow' : variant === 'studs' ? 'Red' : 'None';
     return { infringements: [{ team: 'D', num: def.num, type: 'Foul', card, t: tC }], restart: facts.box ? 'Penalty' : 'Free kick' };
   };
@@ -243,31 +264,34 @@ export function dive(R, o = {}) {
   const trailing = (j) => (side > 0 ? j.anR : j.anL);
   const aj = att.jointsAt(tD);
   const toward = vec.norm([aj.pelvis[0] - def.posAt(tD)[0], 0, aj.pelvis[2] - def.posAt(tD)[1]]);
-  const gap = contact ? 0 : R.range(0.45, 0.7);
+  // `tight` calls: boot and leg either overlap by a centimetre or two, or pass a few centimetres clear
+  const tight = !!o.tight;
+  const gap = contact ? 0 : tight ? 0.17 : R.range(0.45, 0.7);
   const target = vec.sub(trailing(aj), vec.scale(toward, gap));
-  att.fall(tD + (contact ? 0.03 : 0.12), 1, 0.55);
-  if (!contact) { att.arm('both', tD + 0.1, tD + 0.45, { abd: 2.4, fwd: 0.4, bend: 0.2 }, 0.1); }
+  const tFall = tD + (tight ? 0.07 : contact ? 0.03 : 0.12);
+  att.fall(tFall, 1, 0.55);
+  if (!contact) { att.arm('both', tFall - 0.02, tFall + 0.33, { abd: 2.4, fwd: 0.4, bend: 0.2 }, 0.1); }
   const b = clip.ballAt(tD - 0.15);
   clip.ball({ t0: tD - 0.1, t1: tD + 1.4, p0: b, p1: [b[0] + 4, BALL_R, b[2] - side * 1.5], roll: true });
   att.bake();
   aim(clip, def, tD, (j) => (leg > 0 ? j.toR : j.toL), target, tD - 0.8);
   const footSeg = (j) => [leg > 0 ? j.toR : j.toL, leg > 0 ? j.anR : j.anL];
   const legs = (j) => [j.anL, j.anR, j.knL, j.knR, j.toL, j.toR];
-  for (let i = 0; i < 8; i++) {
+  const want = contact ? (tight ? R.range(0.085, 0.105) : 0.04) : tight ? R.range(0.15, 0.19) : 0.45;
+  for (let i = 0; i < (tight ? 16 : 8); i++) {
     def.bake();
     const g = minDistance(def, att, tD - 0.3, tD + 0.3, footSeg, legs);
-    const want = contact ? 0.04 : 0.45;
-    if (contact ? g < 0.08 : g > 0.38) break;
+    if (tight ? Math.abs(g - want) < 0.008 : contact ? g < 0.08 : g > 0.38) break;
     // move the defender's whole approach toward/away from the attacker
     const d = vec.norm([aj.pelvis[0] - def.posAt(tD)[0], 0, aj.pelvis[2] - def.posAt(tD)[1]]);
-    const k = (g - want) * (contact ? 1 : 1.1);
+    const k = (g - want) * (tight ? 0.85 : contact ? 1 : 1.1);
     for (const key of def.keys) if (key[0] >= tD - 0.8) { key[1] += d[0] * k; key[2] += d[2] * k; }
   }
   clip.note(tD - 0.6, `${tag(clip, def)} closes down ${tag(clip, att)}`);
   clip.note(tD + 0.2, `${tag(clip, att)} goes down in the area`, 'warn');
   def.bake();
   const minGap = minDistance(def, att, tD - 0.3, tD + 0.3, (j) => [leg > 0 ? j.toR : j.toL, leg > 0 ? j.anR : j.anL], (j) => [j.anL, j.anR, j.knL, j.knR, j.toL, j.toR]);
-  clip.facts = { contact, minGap };
+  clip.facts = { contact, minGap, tight, clear: Math.max(0, minGap - CONTACT_R) };
   clip.context.question = 'Penalty appeal — was there contact?';
   clip.context.onField = R.pick(['Penalty', 'Play on']);
   clip.resolve = (rules) => contact
@@ -282,7 +306,7 @@ export function dive(R, o = {}) {
 // 3. Handball: defender's arm (raised / by side / chest), or attacker's hand before a goal.
 // ---------------------------------------------------------------------------------------------
 export function handball(R, o = {}) {
-  const variant = o.variant || R.pick(['raised', 'side', 'body', 'attacker', 'raised', 'attackerClean']);
+  const variant = o.variant || R.pick(o.tight ? ['wide', 'tucked', 'wide', 'tucked', 'body'] : ['raised', 'side', 'body', 'attacker', 'raised', 'attackerClean']);
   const clip = setup(R, { duration: 9, defLine: 42, ...o });
   const side = R.sign();
   const winger = clip.find('A', side > 0 ? 11 : 7); winger.key = true;
@@ -341,9 +365,13 @@ export function handball(R, o = {}) {
   if (jumping) def.jump(tH - 0.3, 0.6, 0.4);
   if (variant === 'raised') def.arm(armSide, tH - 0.35, tH + 0.3, { abd: R.range(1.6, 2.2), fwd: 0.3, bend: 0.25 }, 0.18);
   if (variant === 'side') def.arm(armSide, tH - 0.5, tH + 0.3, { abd: 0.12, fwd: 0.05, bend: 0.2 }, 0.2);
+  // the close pair: an arm held ~50-58 degrees out (making the body bigger) against one tucked at ~20-30
+  if (variant === 'wide') def.arm(armSide, tH - 0.5, tH + 0.3, { abd: R.range(0.92, 1.02), fwd: 0.08, bend: 0.2 }, 0.2);
+  if (variant === 'tucked') def.arm(armSide, tH - 0.5, tH + 0.3, { abd: R.range(0.3, 0.46), fwd: 0.08, bend: 0.25 }, 0.2);
   def.bake();
   const j = def.jointsAt(tH);
-  const hit = variant === 'raised' ? j['ha' + armSide] : variant === 'side' ? vec.add(vec.scale(j['el' + armSide], 0.5), vec.scale(j['ha' + armSide], 0.5)) : vec.add(j.chest, [0.14 * Math.cos(def.poseAt(tH).yaw), -0.08, 0.14 * Math.sin(def.poseAt(tH).yaw)]);
+  const armAngle = armAngleDeg(j, armSide);
+  const hit = variant === 'raised' || variant === 'wide' ? j['ha' + armSide] : variant === 'side' || variant === 'tucked' ? vec.add(vec.scale(j['el' + armSide], 0.5), vec.scale(j['ha' + armSide], 0.5)) : vec.add(j.chest, [0.14 * Math.cos(def.poseAt(tH).yaw), -0.08, 0.14 * Math.sin(def.poseAt(tH).yaw)]);
   clip.ball({ t0: tX, t1: tH, p0: from, p1: hit, h: 2.6 });
   const away = [hit[0] - R.range(5, 9), BALL_R, hit[2] + side * R.range(2, 6)];
   clip.ball({ t0: tH, t1: tH + 1.3, p0: hit, p1: away, h: 1.2 });
@@ -356,8 +384,8 @@ export function handball(R, o = {}) {
   clip.note(tH + 0.8, `${clip.attacking.short} appeal for handball`, 'warn');
   ctx.question = 'Handball appeal';
   ctx.onField = R.pick(['Play on', 'Play on', 'Penalty']);
-  clip.facts = { variant, armAbd: variant === 'raised' ? 'above shoulder' : variant === 'side' ? 'by side' : 'n/a', contactPart: variant === 'body' ? 'chest' : 'arm' };
-  clip.resolve = () => variant === 'raised'
+  clip.facts = { variant, armAngle, armAbd: variant === 'raised' ? 'above shoulder' : variant === 'side' ? 'by side' : 'n/a', contactPart: variant === 'body' ? 'chest' : 'arm' };
+  clip.resolve = () => variant === 'raised' || variant === 'wide'
     ? { infringements: [{ team: 'D', num: def.num, type: 'Handball', card: 'None', t: tH }], restart: 'Penalty' }
     : { infringements: [], restart: 'Play on' };
   clip.keyMoment = tH;
@@ -369,7 +397,7 @@ export function handball(R, o = {}) {
 // 4. Offside goal. Margin is exact to the centimetre against the second-last defender.
 // ---------------------------------------------------------------------------------------------
 export function offside(R, o = {}) {
-  const margin = o.margin ?? R.pick([-0.7, -0.3, -0.12, -0.05, 0.05, 0.08, 0.14, 0.3, 0.7]);
+  const margin = o.margin ?? R.pick(o.tight ? [-0.06, -0.03, -0.015, 0.015, 0.03, 0.06] : [-0.5, -0.25, -0.1, -0.05, 0.05, 0.08, 0.14, 0.3, 0.6]);
   const line = R.range(30, 36);
   const clip = setup(R, { duration: 9, defLine: line, ...o });
   const side = R.sign();
@@ -437,7 +465,7 @@ export function offside(R, o = {}) {
 // 5. Goal-line: did the whole ball cross the whole line before the keeper clawed it out?
 // ---------------------------------------------------------------------------------------------
 export function goalLine(R, o = {}) {
-  const delta = o.delta ?? R.pick([-0.08, -0.035, -0.012, 0.012, 0.035, 0.08]); // ball's trailing edge vs line edge
+  const delta = o.delta ?? R.pick(o.tight ? [-0.009, -0.005, -0.003, 0.003, 0.005, 0.009] : [-0.05, -0.025, -0.012, 0.012, 0.025, 0.05]); // ball's trailing edge vs line edge
   const clip = setup(R, { duration: 8, defLine: 42, ...o });
   const st = clip.find('A', 9); st.key = true;
   const side = R.sign();
@@ -474,7 +502,7 @@ export function goalLine(R, o = {}) {
 // 6. Penalty procedure: keeper off the line, encroachment.
 // ---------------------------------------------------------------------------------------------
 export function penalty(R, o = {}) {
-  const variant = o.variant || R.pick(['keeperEarly', 'keeperLegal', 'encroach', 'cleanRebound', 'keeperEarly']);
+  const variant = o.variant || R.pick(o.tight ? ['keeperEarly', 'keeperLegal', 'encroach', 'cleanRebound', 'keeperEarly', 'keeperLegal'] : ['keeperEarly', 'keeperLegal', 'encroach', 'cleanRebound', 'keeperEarly']);
   const clip = setup(R, { duration: 8, defLine: 34, ...o });
   const spot = [GOAL_X - 11, 0];
   const tK = 2.4;
@@ -489,7 +517,19 @@ export function penalty(R, o = {}) {
   gk.path([[0, GOAL_X - 0.05, 0], [tK - 0.45, GOAL_X - 0.05, 0], [tK, early ? GOAL_X - R.range(0.8, 1.2) : GOAL_X - 0.15, 0], [tK + 0.5, early ? GOAL_X - 1.1 : GOAL_X - 0.3, gz * 0.6], [clip.duration, GOAL_X - 0.8, gz * 0.6]]);
   gk.face([[0, Math.PI], [clip.duration, Math.PI]]);
   gk.dive(tK + 0.05, -dir, 0.45, 0.3); // facing -x, so its right is -z
-  const saved = variant !== 'cleanRebound' && variant !== 'encroach' ? true : true;
+  // Pin the keeper's feet against the line at the moment of the kick. The line is 12 cm wide; any
+  // part of a foot on it is legal. Tight calls sit a few centimetres either side of its inner edge.
+  if (variant === 'keeperEarly' || variant === 'keeperLegal') {
+    const target = GOAL_X - 0.12 + (early ? -(o.tight ? R.range(0.045, 0.09) : R.range(0.7, 1.1)) : o.tight ? R.range(0.02, 0.05) : R.range(0.04, 0.1));
+    for (let i = 0; i < 8; i++) {
+      gk.bake();
+      const jj = gk.jointsAt(tK);
+      const dx = target - Math.max(...FEET.map((k) => jj[k][0]));
+      if (Math.abs(dx) < 0.003) break;
+      for (const k of gk.keys) if (k[0] >= tK - 0.45) k[1] += dx;
+    }
+    gk.bake();
+  }
   const hit = [GOAL_X - (early ? 1.0 : 0.25), R.range(0.4, 0.9), gz];
   clip.ball({ t0: tK, t1: tK + 0.45, p0: [spot[0], BALL_R, spot[1]], p1: hit, h: 0.15 });
   const reb = [GOAL_X - R.range(6, 8), BALL_R, gz * 0.4 + R.range(-1.5, 1.5)];
@@ -512,6 +552,18 @@ export function penalty(R, o = {}) {
     const z0 = reb[2] + R.range(-3, 3);
     scorer.path([[0, BOX_X - 1.6, z0], [tK - 0.6, BOX_X - 1.4, z0], [tK, into, z0 * 0.9], [tK + 1.35, reb[0] - 0.4, reb[2]], [tK + 1.6, reb[0], reb[2]], [clip.duration, reb[0] + 3, reb[2]]]);
     scorer.bake();
+    if (o.tight) {
+      // leading boot a few centimetres either side of the painted line
+      const target = BOX_X + (variant === 'encroach' ? R.range(0.05, 0.12) : -R.range(0.07, 0.14));
+      for (let i = 0; i < 8; i++) {
+        scorer.bake();
+        const jj = scorer.jointsAt(tK);
+        const dx = target - Math.max(...FEET.map((k) => jj[k][0]));
+        if (Math.abs(dx) < 0.003) break;
+        for (const k of scorer.keys) if (k[0] >= tK - 0.6 && k[0] <= tK + 0.001) k[1] += dx;
+      }
+      scorer.bake();
+    }
     scorer.kick(tK + 1.55, 1, 0.45);
     const goal = [GOAL_X + 0.6, R.range(0.3, 1.3), R.range(-2.5, 2.5)];
     clip.ball({ t0: tK + 1.55, t1: tK + 2.0, p0: reb, p1: goal, h: 0.2 });
@@ -525,7 +577,8 @@ export function penalty(R, o = {}) {
   const ctx = clip.context;
   ctx.question = scorer ? 'Goal from a penalty rebound — check the kick' : 'Penalty saved — check the kick';
   ctx.onField = scorer ? 'Goal' : 'Play on';
-  clip.facts = { variant };
+  const over = scorer ? Math.abs(Math.max(...FEET.map((k) => scorer.jointsAt(tK)[k][0])) - BOX_X) : 0;
+  clip.facts = { variant, tight: !!o.tight, over };
   clip.resolve = () => {
     if (variant === 'keeperEarly') return { infringements: [{ team: 'D', num: 1, type: 'Keeper off line', card: 'Yellow', t: tK }], restart: 'Retake penalty' };
     if (variant === 'encroach') return { infringements: [{ team: 'A', num: encroacher.num, type: 'Encroachment', card: 'None', t: tK }], restart: 'Disallow goal' };
@@ -535,6 +588,7 @@ export function penalty(R, o = {}) {
   clip.keyMoment = tK;
   clip.subjects = [gk, kicker];
   clip.penalty = true;
+  clip.scorer = scorer;
   return finish(clip, R, [44, 0]);
 }
 
@@ -583,6 +637,12 @@ export function addOffBall(clip, R, kind = null) {
   };
   clip.offBall = { kind, agg, vic, t: tV };
   return clip;
+}
+
+// Angle between the upper arm and the body's own down direction, in degrees (the limit in the rulebook is 45).
+export function armAngleDeg(j, side) {
+  const u = vec.sub(j['el' + side], j['sh' + side]), down = vec.sub(j.pelvis, j.chest);
+  return Math.round((Math.acos(Math.max(-1, Math.min(1, vec.dot(u, down) / (vec.len(u) * vec.len(down))))) * 180) / Math.PI);
 }
 
 export function tag(clip, a) { return `#${a.num} ${a.team === 'A' ? clip.attacking.short : clip.defending.short}`; }

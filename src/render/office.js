@@ -426,7 +426,7 @@ export function buildOffice(o) {
   scene.add(mesh(new THREE.BoxGeometry(0.84, 0.003, 0.34), [toon(0x1f3b33), toon(0x1f3b33), toon(0xffffff, { map: matTex, unique: true }), toon(0x1f3b33), toon(0x1f3b33), toon(0x1f3b33)], { pos: [0.02, DESK_Y + 0.0015, 0.14], rot: [0, 0.015, 0], cast: false }));
   // stack of finished tapes
   for (let i = 0; i < 3; i++) {
-    const lt = canvasTex(256, 144, (x, W, Hh) => { x.fillStyle = '#1b1d22'; x.fillRect(0, 0, W, Hh); x.fillStyle = '#efe9d6'; x.fillRect(70, 8, 116, 30); x.fillStyle = '#2f6f9a'; x.fillRect(70, 8, 116, 6); x.fillStyle = '#2b2e36'; x.beginPath(); x.arc(70, 88, 26, 0, 7); x.arc(186, 88, 26, 0, 7); x.fill(); });
+    const lt = canvasTex(256, 144, (x, W, Hh) => { x.fillStyle = '#1b1d22'; x.fillRect(0, 0, W, Hh); x.fillStyle = '#efe9d6'; x.fillRect(40, 8, 176, 40); x.fillStyle = ['#2f6f9a', '#d8262f', '#2e8b57'][i]; x.fillRect(40, 8, 176, 8); x.fillStyle = '#16213a'; x.font = '700 16px Silkscreen, monospace'; x.textAlign = 'left'; x.textBaseline = 'top'; x.fillText(`TAPE 1-0${i + 1}`, 48, 24); x.fillStyle = '#2b2e36'; x.beginPath(); x.arc(70, 92, 26, 0, 7); x.arc(186, 92, 26, 0, 7); x.fill(); x.fillStyle = '#4a3326'; x.beginPath(); x.arc(70, 92, 15, 0, 7); x.arc(186, 92, 15, 0, 7); x.fill(); });
     const t = mesh(rbox(0.19, 0.025, 0.105, 0.004), [toon(0x1b1d22), toon(0x1b1d22), toon(0xffffff, { map: lt, unique: true }), toon(0x1b1d22), toon(0x1b1d22), toon(0x1b1d22)], { pos: [1.13, DESK_Y + 0.0125 + i * 0.026, -0.42], rot: [0, 0.3 + i * 0.12 - (i === 2 ? 0.3 : 0), 0] });
     scene.add(t);
   }

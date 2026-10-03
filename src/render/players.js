@@ -17,6 +17,35 @@ const mat = (hex, r = 0.75) => {
   return matCache.get(k);
 };
 
+const BOOTS = [0x151515, 0x151515, 0xff6b00, 0x00c2ff, 0xf5f000, 0xf2f2f2, 0xff2d95];
+const patCache = new Map();
+// A kit's shirt: plain colour, or a canvas with stripes / hoops wrapped round the torso cylinder.
+function shirtMaterial(kit, gk) {
+  if (gk || !kit.pattern || kit.pattern === 'plain') return mat(gk ? kit.gk : kit.shirt, 0.7);
+  const key = kit.id + ':' + kit.pattern;
+  if (!patCache.has(key)) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const x = c.getContext('2d');
+    const base = '#' + new THREE.Color(kit.shirt).getHexString(), alt = '#' + new THREE.Color(kit.alt).getHexString();
+    x.fillStyle = base; x.fillRect(0, 0, 64, 64);
+    x.fillStyle = alt;
+    if (kit.pattern === 'stripes') for (let i = 0; i < 64; i += 16) x.fillRect(i, 0, 8, 64);
+    else if (kit.pattern === 'hoops') for (let i = 0; i < 64; i += 16) x.fillRect(0, i, 64, 8);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.minFilter = t.magFilter = THREE.NearestFilter;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(kit.pattern === 'stripes' ? 2 : 1, 1);
+    patCache.set(key, new THREE.MeshToonMaterial({ color: 0xffffff, map: t, gradientMap: gradientMap() }));
+  }
+  const m = patCache.get(key);
+  matCache.set('pat:' + key, m); // so setGhost reaches it
+  return m;
+}
+
+const blobGeo = new THREE.CircleGeometry(0.5, 20);
+
 export function setGhost(on) {
   for (const m of matCache.values()) { m.transparent = on; m.opacity = on ? 0.28 : 1; m.depthWrite = !on; m.needsUpdate = true; }
 }
@@ -31,7 +60,7 @@ export class PlayerMesh {
     this.group = new THREE.Group();
     this.parts = [];
     const limb = (a, b, r, color, rough) => {
-      const m = new THREE.Mesh(cyl, mat(color, rough));
+      const m = new THREE.Mesh(cyl, color && color.isMaterial ? color : mat(color, rough));
       m.castShadow = true;
       this.group.add(m);
       this.parts.push({ m, a, b, r, kind: 'limb' });
@@ -45,11 +74,14 @@ export class PlayerMesh {
       return m;
     };
     // torso: wide capsule
-    const sock = kit.socks, shorts = gk ? 0x222222 : kit.shorts, boot = 0x151515;
-    limb('pelvis', 'chest', 0.19, shirt, 0.7);
+    const sock = kit.socks, shorts = gk ? 0x222222 : kit.shorts, boot = BOOTS[(actor.num * 3 + actor.id) % BOOTS.length];
+    const shirtM = shirtMaterial(kit, gk);
+    limb('pelvis', 'chest', 0.19, shirtM, 0.7);
     this.torso = this.parts[this.parts.length - 1];
     ball('pelvis', 0.19, shorts);
-    ball('chest', 0.21, shirt, 0.8);
+    const chestBall = ball('chest', 0.21, shirt, 0.8);
+    chestBall.material = shirtM;
+    if (!gk) ball('neck', 0.075, kit.alt ?? kit.num ?? 0xffffff); // collar
     limb('chest', 'neck', 0.06, skin);
     const head = ball('head', DIM.headR, skin, 1.1);
     const hairM = ball('head', DIM.headR * 1.04, hair, 0.75);
@@ -62,10 +94,10 @@ export class PlayerMesh {
       this.group.add(this.mouth);
     }
     for (const s of ['L', 'R']) {
-      limb('sh' + s, 'el' + s, 0.062, shirt);
+      limb('sh' + s, 'el' + s, 0.062, gk ? shirt : kit.sleeve ?? shirt);
       limb('el' + s, 'ha' + s, 0.048, gk ? shirt : skin);
       ball('ha' + s, gk ? 0.065 : 0.05, gk ? 0x7cd36b : skin);
-      ball('sh' + s, 0.07, shirt);
+      ball('sh' + s, 0.07, gk ? shirt : kit.sleeve ?? shirt);
       limb('hip' + s, 'kn' + s, 0.085, shorts);
       limb('kn' + s, 'an' + s, 0.062, sock);
       ball('kn' + s, 0.066, sock);
@@ -74,6 +106,11 @@ export class PlayerMesh {
     // number on the back + shorts number
     this.num = numberPlane(actor.num, kit.num ?? 0xffffff, gk);
     this.group.add(this.num);
+    // contact shadow: a soft dark disc under every player, so they sit on the grass
+    this.blob = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ color: 0x07140a, transparent: true, opacity: 0.34, depthWrite: false }));
+    this.blob.rotation.x = -Math.PI / 2;
+    this.blob.renderOrder = 1;
+    this.group.add(this.blob);
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }));
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.visible = false;
@@ -111,6 +148,10 @@ export class PlayerMesh {
     const m = new THREE.Matrix4().makeBasis(side.clone().negate(), spine, fwd.clone().negate());
     this.num.quaternion.setFromRotationMatrix(m);
     this.ring.position.set(pel.x, 0.02, pel.z);
+    this.blob.position.set(pel.x, 0.015, pel.z);
+    const lift = Math.max(0, pel.y - 0.95);
+    this.blob.scale.setScalar(Math.max(0.5, 1.35 - lift * 0.7));
+    this.blob.material.opacity = 0.34 * Math.max(0.15, 1 - lift * 0.9);
   }
 }
 
@@ -123,7 +164,7 @@ function numberPlane(n, color, gk) {
     c.width = c.height = 128;
     const x = c.getContext('2d');
     x.fillStyle = '#' + new THREE.Color(color).getHexString();
-    x.font = '900 96px Nunito, sans-serif';
+    x.font = `700 ${n > 9 ? 72 : 100}px Silkscreen, sans-serif`;
     x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(String(n), 64, 70);
     tex = new THREE.CanvasTexture(c);

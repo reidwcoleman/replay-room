@@ -109,11 +109,11 @@ export function crtMaterial(tex, o = {}) {
     uniforms: {
       tScreen: { value: tex }, rows: { value: o.rows ?? 360 }, curve: { value: o.curve ?? CURVE },
       power: { value: 1 }, time: { value: 0 }, mono: { value: o.mono ? 1 : 0 }, gain: { value: o.gain ?? 1.0 },
-      tint: { value: new THREE.Color(o.tint ?? 0xe8ffe0) }, noise: { value: 0 }, roll: { value: 0 },
+      tint: { value: new THREE.Color(o.tint ?? 0xe8ffe0) }, noise: { value: 0 }, roll: { value: 0 }, vhs: { value: 0 },
     },
     vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */`
-      uniform sampler2D tScreen; uniform float rows, curve, power, time, mono, gain, noise, roll; uniform vec3 tint;
+      uniform sampler2D tScreen; uniform float rows, curve, power, time, mono, gain, noise, roll, vhs; uniform vec3 tint;
       varying vec2 vUv;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
       void main() {
@@ -124,12 +124,26 @@ export function crtMaterial(tex, o = {}) {
         float sy = mix(0.004, 1.0, smoothstep(0.0, 0.6, p)), sx = mix(0.02, 1.0, smoothstep(0.0, 0.25, p));
         uv = (uv - 0.5) / vec2(sx, sy) + 0.5;
         uv.y = fract(uv.y + roll);
+        // VHS playback: line jitter, a slow tracking band that tears sideways, head-switching at the foot
+        float band = 0.0, foot = 0.0;
+        if (vhs > 0.001) {
+          float rowN = floor(uv.y * rows);
+          float jit = hash(vec2(rowN, floor(time * 24.0))) - 0.5;
+          float by = fract(time * 0.055 + 0.35);
+          band = smoothstep(0.07, 0.0, abs(uv.y - by));
+          foot = smoothstep(0.05, 0.0, uv.y);
+          uv.x += (jit * 0.0012 + band * sin(uv.y * 90.0 + time * 40.0) * 0.010 + foot * (hash(vec2(rowN, time)) - 0.5) * 0.06) * vhs;
+        }
         vec3 col = vec3(0.0);
         if (uv.x > 0. && uv.x < 1. && uv.y > 0. && uv.y < 1.) {
           vec3 s = texture2D(tScreen, uv).rgb;
           // a little horizontal colour bleed like composite video
           vec3 s2 = texture2D(tScreen, uv + vec2(1.5 / (rows * 1.333), 0.)).rgb;
           s = mix(s, vec3(s.r, s2.g, s2.b), 0.35);
+          if (vhs > 0.001) {
+            float cs = vhs * 0.002;
+            s = vec3(texture2D(tScreen, uv + vec2(cs, 0.)).r, s.g, texture2D(tScreen, uv - vec2(cs, 0.)).b);
+          }
           // halation: bright phosphor bleeds a soft glow into the glass around it
           vec2 hs = vec2(2.5 / (rows * 1.333), 2.5 / rows);
           vec3 halo = texture2D(tScreen, uv + vec2(hs.x, 0.)).rgb + texture2D(tScreen, uv - vec2(hs.x, 0.)).rgb
@@ -143,6 +157,7 @@ export function crtMaterial(tex, o = {}) {
           col = s * tint * line * gain * mask;
           col += (hash(uv * 500.0 + time) - 0.5) * (0.03 + noise * 0.4);
           col *= 0.94 + 0.06 * sin(time * 9.0 + uv.y * 4.0);
+          col += (band * step(0.985, hash(uv * vec2(300.0, rows) + time)) * 0.8 + foot * hash(uv * 400.0 + time * 3.0) * 0.5) * vhs;
           vec2 q = uv - 0.5;
           col *= 1.0 - dot(q, q) * 1.1;
           if (p < 0.6) col += vec3(0.6, 0.9, 0.8) * (1.0 - smoothstep(0.0, 0.6, p)) * step(0.001, p);

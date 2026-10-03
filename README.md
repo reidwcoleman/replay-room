@@ -31,6 +31,16 @@ Everything happens at a cel-shaded 3D desk with ink outlines (`src/render/office
 - Scroll on the monitor to zoom toward the cursor, drag to pan, click a player to select them
 - Q / W / E: desk / monitor / tape · Enter sends the tape · Space or click skips the result sequence
 
+## Photo finishes
+Some tapes are stamped PHOTO FINISH and are decided by frames or centimetres:
+- **Tackles**: one boot hits the ball and the standing leg 2-4 frames apart. Whichever comes first decides it.
+- **Dives**: a boot that passes 3-7 cm clear of the leg, or brushes it by a centimetre.
+- **Handball**: an arm held ~50-58 degrees out against one tucked at ~20-30. The limit is 45. Select the player and the tape shows each arm's angle.
+- **Offside**: 1.5 to 6 cm. **Goal-line**: 3 to 9 mm. **Penalty**: the keeper's rear boot 2 to 9 cm either side of the 12 cm line, or a striker's boot a few cm either side of the area line.
+- The LINE tool (O) measures all of them: attacker vs defender in cm, the ball's edge against the goal line, the keeper's foot against the line, the striker's boot against the area line.
+- The first time you watch a tape it crawls into slow-mo and the camera pushes in on the incident. Any input hands control back.
+- Calling a photo finish right pays a bonus; consecutive good calls build a streak. **Overtime** (title screen) is an endless run at the hardest rules, closer every tape, three wrong calls and you are out. Best score is kept in localStorage.
+
 ## How the replays work
 Every replay is generated (`src/sim/incidents.js`) from a single skeleton model (`src/sim/kinematics.js`).
 The renderer and the judge read the same model, so the correct call matches what you see on screen. Offside
@@ -39,7 +49,8 @@ in force that day (`src/sim/rules.js`).
 
 ## Dev
 - `npm run dev` (port 5240). `?day=4&case=2` jumps straight to a case, `?fast` skips camera moves and the result sequence.
-- `npm test` generates 240 replays and checks the geometry matches the stated outcome: contact gaps, arm height at a handball, offside margin, goal-line depth, keeper's feet at a penalty.
+- `npm test` generates 480 replays (half of them tight photo finishes), builds every campaign and Overtime case and checks the geometry matches the stated outcome: contact gaps, arm height at a handball, offside margin, goal-line depth, keeper's feet at a penalty.
 - `node tools/playthrough.mjs honest|bribe|sloppy` plays all five shifts headless and prints every case and the ending.
 - `node tools/inputtest.mjs` drives the booth with the real mouse (pick on the CRT, lines, zoom, deck keys, slider, sticker drag).
+- `node tools/feed.mjs day case t cam zoom out` saves the raw 480x360 replay feed (no desk or glass) at 2x for checking the picture.
 - `node tools/views.mjs [prefix]` screenshots every booth view (title, monitor, desk, tape, the send sequence, the printout) into `shots/`.
