@@ -16,9 +16,9 @@ export function buildStadium(scene, home) {
   const x = c.getContext('2d');
   const sx = W / 120, sz = H / 80;
   const px = (m) => (m + 60) * sx, pz = (m) => (m + 40) * sz;
-  x.fillStyle = '#4fae3f'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#3f9439'; x.fillRect(0, 0, W, H);
   for (let i = 0; i < 20; i++) {
-    x.fillStyle = i % 2 ? '#5cbf48' : '#4ba63c';
+    x.fillStyle = i % 2 ? '#4ca845' : '#3a8a35';
     x.fillRect(px(-52.5 + i * 5.25), pz(-34), 5.25 * sx + 1, 68 * sz);
   }
   // grain

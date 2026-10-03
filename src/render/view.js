@@ -103,7 +103,7 @@ export class ReplayView {
     let pos, look, fov = 30;
     const focus = this.selected ? new THREE.Vector3(...this.selected.actor.jointsAt(this.t).pelvis) : null;
     switch (this.cam) {
-      case 'broadcast': pos = new THREE.Vector3(sb.x * 0.85, 16, -37.5); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 + 2); fov = 30; break;
+      case 'broadcast': pos = new THREE.Vector3(sb.x * 0.85, 16, -37.5); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 + 2); fov = 25; break;
       case 'reverse': pos = new THREE.Vector3(sb.x * 0.85, 14, 37.5); look = new THREE.Vector3(sb.x, 0, sb.z * 0.8 - 2); fov = 32; break;
       case 'behind': pos = new THREE.Vector3(GOAL_X + 5, 6.5, sb.z * 0.25); look = new THREE.Vector3(Math.min(sb.x, GOAL_X - 6) - 4, 0.6, sb.z * 0.6); fov = 40; break;
       case 'tactical': pos = new THREE.Vector3(sb.x, 62, sb.z); look = new THREE.Vector3(sb.x, 0, sb.z); fov = 38; break;

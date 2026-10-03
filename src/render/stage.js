@@ -47,6 +47,8 @@ export class Stage {
     this.onHover = null;    // (object|null, clientX, clientY)
     this.onRail = null;     // (fraction 0..1, phase)
     this.screenInput = false;
+    this.crowdHeat = 0.3;
+    this.bigBlink = true;
     this.ray = new THREE.Raycaster();
 
     // post chain
@@ -341,13 +343,14 @@ export class Stage {
     for (const w of ['main', 'live', 'term']) {
       const u = H[w].screen.material.uniforms;
       u.time.value = this.time;
-      H.glow[w].intensity = 0.12 * u.power.value;
+      H.glow[w].intensity = (w === 'main' ? 0.07 : 0.12) * u.power.value;
     }
     this.ink.uniforms.time.value = this.time;
+    this._ambient(dt);
 
     // office depth + normals for the ink pass
     const r = this.renderer;
-    const hidden = H.steam.filter((s) => s.visible);
+    const hidden = [...H.steam, ...H.effects].filter((s) => s.visible);
     hidden.forEach((s) => (s.visible = false));
     this.scene.overrideMaterial = this.normalMat;
     r.setRenderTarget(this.ndRT);
@@ -362,6 +365,40 @@ export class Stage {
     r.shadowMap.needsUpdate = true;
     this.composer.render(dt);
   }
+
+  // the room around you keeps moving: dust drifts, cameras flash in the stands, the big screen
+  _ambient(dt) {
+    const H = this.H, t = this.time;
+    const p = H.dust.geometry.attributes.position, b = H.dust.userData.base;
+    for (let i = 0; i < p.count; i++) {
+      p.array[i * 3] = b[i * 3] + Math.sin(t * 0.13 + i) * 0.05;
+      p.array[i * 3 + 1] = b[i * 3 + 1] + Math.sin(t * 0.09 + i * 1.7) * 0.06;
+      p.array[i * 3 + 2] = b[i * 3 + 2] + Math.cos(t * 0.11 + i * 0.7) * 0.04;
+    }
+    p.needsUpdate = true;
+    this._flashT = (this._flashT || 0) - dt;
+    if (this._flashT <= 0) {
+      this._flashT = 0.08;
+      const f = H.flashes.userData.ctx;
+      f.clearRect(0, 0, 256, 128);
+      const n = 1 + Math.floor(Math.random() * (2 + this.crowdHeat * 8));
+      for (let i = 0; i < n; i++) { f.fillStyle = '#fff'; f.fillRect(Math.random() * 256, 38 + Math.random() * 34, 1, 1); }
+      H.flashes.needsUpdate = true;
+    }
+    this._bigT = (this._bigT || 0) - dt;
+    if (this._bigT <= 0) {
+      this._bigT = 0.5;
+      const x = H.bigScreen.userData.ctx, on = Math.floor(t * 2) % 2 === 0;
+      x.fillStyle = '#05070d'; x.fillRect(0, 0, 128, 48);
+      x.fillStyle = '#10182c'; for (let i = 0; i < 48; i += 2) x.fillRect(0, i, 128, 1);
+      x.font = '16px Silkscreen'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      const msg = this.bigText || ['VAR', 'CHECK'];
+      x.fillStyle = this.bigColor || '#ffd23f';
+      if (on || !this.bigBlink) { x.fillText(msg[0], 64, 15); x.fillText(msg[1] || '', 64, 34); }
+      H.bigScreen.needsUpdate = true;
+    }
+  }
+  setBigScreen(lines, color = '#ffd23f', blink = true) { this.bigText = lines; this.bigColor = color; this.bigBlink = blink; this._bigT = 0; }
 
   // where a world point lands on the page (for speech bubbles / tooltips)
   toPage(obj, offset = [0, 0, 0]) {

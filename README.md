@@ -42,3 +42,4 @@ in force that day (`src/sim/rules.js`).
 - `npm test` generates 240 replays and checks the geometry matches the stated outcome: contact gaps, arm height at a handball, offside margin, goal-line depth, keeper's feet at a penalty.
 - `node tools/playthrough.mjs honest|bribe|sloppy` plays all five shifts headless and prints every case and the ending.
 - `node tools/inputtest.mjs` drives the booth with the real mouse (pick on the CRT, lines, zoom, deck keys, slider, sticker drag).
+- `node tools/views.mjs [prefix]` screenshots every booth view (title, monitor, desk, tape, the send sequence, the printout) into `shots/`.

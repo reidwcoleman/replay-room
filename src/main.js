@@ -6,7 +6,7 @@ const sound = new Sound();
 addEventListener('pointerdown', () => sound.unlock());
 
 // Canvas text (CRTs, stickers, posters) needs the web fonts loaded before the first draw.
-const fonts = ['8px Silkscreen', '16px Silkscreen', '700 20px Nunito', '800 20px Nunito', '900 20px Nunito', '700 20px Caveat'];
+const fonts = ['8px Silkscreen', '16px Silkscreen', '700 16px Silkscreen', '20px VT323', '700 20px Nunito', '800 20px Nunito', '900 20px Nunito', '700 20px Caveat'];
 await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f))), new Promise((r) => setTimeout(r, 2500))]);
 
 const app = new App(document.getElementById('app'), sound, { fast: q.has('fast') });

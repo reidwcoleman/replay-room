@@ -110,6 +110,7 @@ export class App {
     this.stage.resetTape();
     this.stage.setNote(null);
     this.live.setBanner({ top: 'COASTAL PREMIER LEAGUE', main: 'MATCHDAY LIVE' });
+    this.stage.setBigScreen(['MATCH', 'DAY'], '#ffd23f', false);
     this.live.mode = 'idle';
     this.live.setMatch(null);
     this.term.text(['REVIEW DESK OS 2.1', '', 'ALL SYSTEMS NOMINAL', 'AWAITING REVIEWER'], { cursor: true });
@@ -122,7 +123,7 @@ export class App {
     });
     this._setScreen('title-screen', h('div', 'title-wrap', [
       h('div', 'title-tag', 'A video referee game'),
-      h('h1', 'title', ['Replay', h('br'), 'Room']),
+      h('h1', 'title', [h('span', '', 'Replay'), h('span', '', 'Room')]),
       h('p', 'title-sub', 'Five shifts in a review booth. Watch the tapes, find what the referee missed, stick your call on the cassette and get it right before the stadium turns on you.'),
       h('div', 'title-actions', [
         h('button', 'btn primary big', { onclick: () => { this.sound.unlock(); this.sound.key(); this.start(newState()); } }, saved && !saved.ending ? 'New career' : 'Start shift one'),
@@ -149,6 +150,7 @@ export class App {
     this.clock = 9 * 60;
     this.stage.goTo('focus', this.fast ? 0 : 1.2);
     this.live.setBanner({ top: 'TODAY', main: 'MATCHDAY ' + D.day });
+    this.stage.setBigScreen(['KICK', 'OFF'], '#ffd23f', false);
     this.term.text([`SHIFT ${D.day} OF 5`, '', 'LOGGING IN...'], { cursor: true });
     this._mainIdle((x, t) => {
       txt(x, `SHIFT ${D.day} OF 5`, 240, 90, 16, '#3f8f5a');

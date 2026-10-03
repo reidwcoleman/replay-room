@@ -8,7 +8,9 @@ import { pixelMaterial } from './crt.js';
 import { toon } from './toon.js';
 
 const W = 256, H = 192;
-const REF_KIT = { shirt: 0x1d1f26, shorts: 0x1d1f26, socks: 0x1d1f26, num: 0x1d1f26, gk: 0x1d1f26 };
+// the referee faces the touchline camera
+const FACE = -Math.PI / 2;
+const REF_KIT = { shirt: 0xf2c230, shorts: 0x16181f, socks: 0x16181f, num: 0x16181f, gk: 0xf2c230 };
 const lerp = (a, b, t) => a + (b - a) * t;
 const ease = (t) => (t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t));
 
@@ -43,12 +45,19 @@ export class LiveFeed {
     const line = new THREE.Mesh(new THREE.PlaneGeometry(40, 0.12), toon(0xf4f4f4));
     line.rotation.x = -Math.PI / 2; line.position.set(0, 0.01, 1.2);
     s.add(line);
-    // ad boards + stands with an animated crowd texture
-    const boards = new THREE.Mesh(new THREE.BoxGeometry(40, 0.9, 0.1), toon(0x16213a));
-    boards.position.set(0, 0.45, -4);
+    // LED ad boards that scroll, stands with an animated crowd, a roof edge and floodlight glow
+    this.ledCanvas = document.createElement('canvas');
+    this.ledCanvas.width = 512; this.ledCanvas.height = 16;
+    this.ledTex = new THREE.CanvasTexture(this.ledCanvas);
+    this.ledTex.minFilter = this.ledTex.magFilter = THREE.NearestFilter;
+    this.ledTex.colorSpace = THREE.SRGBColorSpace;
+    this.ledTex.wrapS = THREE.RepeatWrapping;
+    this.ledTex.repeat.set(6, 1);
+    const boards = new THREE.Mesh(new THREE.BoxGeometry(40, 0.7, 0.1), [toon(0x16213a), toon(0x16213a), toon(0x16213a), toon(0x16213a), new THREE.MeshBasicMaterial({ map: this.ledTex }), toon(0x16213a)]);
+    boards.position.set(0, 0.35, -4);
     s.add(boards);
     this.crowdCanvas = document.createElement('canvas');
-    this.crowdCanvas.width = 256; this.crowdCanvas.height = 128;
+    this.crowdCanvas.width = 384; this.crowdCanvas.height = 192;
     this.crowdTex = new THREE.CanvasTexture(this.crowdCanvas);
     this.crowdTex.minFilter = this.crowdTex.magFilter = THREE.NearestFilter;
     this.crowdTex.colorSpace = THREE.SRGBColorSpace;
@@ -57,12 +66,15 @@ export class LiveFeed {
     stand.rotation.x = -0.35;
     s.add(stand);
     this.fans = [];
-    const pal = ['#d9463e', '#f4f4f4', '#2f6f9a', '#e0b04a', '#2a2a2a', '#5ad1e6', '#e0a878', '#8a5636'];
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 30; c++) {
-      if ((r * 31 + c * 17) % 11 === 0) continue;
-      this.fans.push({ x: c * 8.6 + (r % 2) * 4, y: 12 + r * 12.5, col: pal[(r * 7 + c * 3) % pal.length], skin: ['#e0a878', '#8a5636', '#c48a5c', '#5e3a24'][(r + c) % 4], ph: Math.random() * 6 });
+    const pal = ['#d9463e', '#f4f4f4', '#2f6f9a', '#e0b04a', '#2a2a2a', '#5ad1e6', '#e85a8a', '#3f9a4a'];
+    const skins = ['#f1c7a5', '#d9a47c', '#b57c55', '#8a5636', '#5e3a24'];
+    const hairs = ['#1a1410', '#3b2a1e', '#6b4a2b', '#c9a35a', '#8c3b1d'];
+    let seed = 9;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let r = 0; r < 16; r++) for (let c = 0; c < 48; c++) {
+      if (rnd() < 0.08) continue;
+      this.fans.push({ x: c * 8 + (r % 2) * 4, y: 10 + r * 11, col: pal[Math.floor(rnd() * pal.length)], skin: skins[Math.floor(rnd() * skins.length)], hair: hairs[Math.floor(rnd() * hairs.length)], ph: rnd() * 6, scarf: rnd() < 0.2 });
     }
-
     this.ref = new PlayerMesh({ keeper: false, num: '', id: 3, jointsAt: () => null }, REF_KIT, { face: true });
     s.add(this.ref.group);
     this.ref.ring.visible = false;
@@ -90,7 +102,7 @@ export class LiveFeed {
 
   _pose() {
     const p = basePose();
-    p.x = 0; p.z = 0; p.yaw = Math.PI / 2 + Math.sin(this.t * 0.4) * 0.08;
+    p.x = 0; p.z = 0; p.yaw = FACE + Math.sin(this.t * 0.4) * 0.08;
     p.phase = 0;
     p.lean = Math.sin(this.t * 1.3) * 0.02;
     const A = this.anim;
@@ -113,7 +125,7 @@ export class LiveFeed {
         if (t > 2.6) this._next();
       } else if (A.kind === 'penalty') {
         const u = ease(t / 0.4);
-        p.armR = { abd: 0.1, fwd: lerp(0, 1.15, u), bend: 0.05 }; p.yaw = Math.PI / 2 - 0.5 * u;
+        p.armR = { abd: 0.1, fwd: lerp(0, 1.15, u), bend: 0.05 }; p.yaw = FACE - 0.5 * u;
         if (t > 2.2) this._next();
       } else if (A.kind === 'free') {
         const u = ease(t / 0.4);
@@ -121,7 +133,7 @@ export class LiveFeed {
         if (t > 2.0) this._next();
       } else if (A.kind === 'goal') {
         const u = ease(t / 0.4);
-        p.armR = { abd: 0.05, fwd: lerp(0, 1.45, u), bend: 0.05 }; p.yaw = Math.PI / 2 + 0.9 * u;
+        p.armR = { abd: 0.05, fwd: lerp(0, 1.45, u), bend: 0.05 }; p.yaw = FACE + 0.9 * u;
         if (t > 2.0) this._next();
       } else if (A.kind === 'nogoal') {
         const w = Math.sin(t * 9) * 0.35 * ease(t / 0.3) * (1 - ease((t - 1.6) / 0.4));
@@ -162,17 +174,35 @@ export class LiveFeed {
 
   _drawCrowd() {
     const x = this.crowdCanvas.getContext('2d');
-    x.fillStyle = '#3a4152'; x.fillRect(0, 0, 256, 128);
-    for (let r = 0; r < 10; r++) { x.fillStyle = r % 2 ? '#454d63' : '#3d4558'; x.fillRect(0, r * 12.5 + 8, 256, 12); }
+    const Wc = 384, Hc = 192;
+    x.fillStyle = '#272d3d'; x.fillRect(0, 0, Wc, Hc);
+    for (let r = 0; r < 17; r++) { x.fillStyle = r % 2 ? '#323a50' : '#2b3246'; x.fillRect(0, r * 11 + 6, Wc, 11); }
     const ex = this.excite;
     for (const f of this.fans) {
-      const bob = Math.max(0, Math.sin(this.t * (5 + ex * 6) + f.ph)) * (1 + ex * 4);
-      const y = f.y - bob;
-      x.fillStyle = f.col; x.fillRect(f.x, y + 4, 6, 6);
-      x.fillStyle = f.skin; x.fillRect(f.x + 1, y, 4, 4);
-      if (ex > 0.6 && Math.sin(f.ph * 3 + this.t * 2) > 0.6) { x.fillStyle = f.col; x.fillRect(f.x - 1, y - 4, 2, 6); x.fillRect(f.x + 5, y - 4, 2, 6); }
+      const bob = Math.max(0, Math.sin(this.t * (5 + ex * 6) + f.ph)) * (1 + ex * 3);
+      const y = Math.round(f.y - bob);
+      x.fillStyle = f.col; x.fillRect(f.x + 1, y + 4, 5, 6);
+      x.fillStyle = f.skin; x.fillRect(f.x + 2, y, 3, 4);
+      x.fillStyle = f.hair; x.fillRect(f.x + 2, y, 3, 1);
+      if (f.scarf) { x.fillStyle = '#f4f4f4'; x.fillRect(f.x + 1, y + 4, 5, 1); }
+      // arms up when the crowd is going
+      if (ex > 0.55 && Math.sin(f.ph * 3 + this.t * 2) > 0.5 - ex * 0.4) { x.fillStyle = f.skin; x.fillRect(f.x, y - 3, 1, 5); x.fillRect(f.x + 6, y - 3, 1, 5); }
     }
+    // camera flashes
+    for (let i = 0; i < 2 + ex * 6; i++) if (Math.random() < 0.3) { x.fillStyle = '#fff'; x.fillRect(Math.random() * Wc, 10 + Math.random() * 160, 2, 2); }
+    // roof edge
+    x.fillStyle = '#0f1320'; x.fillRect(0, 0, Wc, 6);
     this.crowdTex.needsUpdate = true;
+    // scrolling LED boards
+    const l = this.ledCanvas.getContext('2d');
+    const ads = [['#d9463e', '#fff', 'REPLAY ROOM'], ['#1b2a6b', '#ffd23f', 'FAIR PLAY'], ['#e0b04a', '#10141c', 'COASTAL LEAGUE'], ['#3f9a4a', '#fff', 'RESPECT THE CALL']];
+    const off = Math.floor(this.t * 24) % 512;
+    l.font = '8px Silkscreen'; l.textBaseline = 'middle';
+    for (let i = 0; i < 4; i++) {
+      const [bg, fg, txt] = ads[i], x0 = ((i * 128 - off) % 512 + 512) % 512;
+      for (const xx of [x0, x0 - 512]) { l.fillStyle = bg; l.fillRect(xx, 0, 128, 16); l.fillStyle = fg; l.fillText(txt, xx + 6, 9); }
+    }
+    this.ledTex.needsUpdate = true;
   }
 
   _drawOSD() {

@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 
 const W = 320, H = 240;
+const BG = '#050a07';
 const G = '#7dff9a', GD = '#2f7a45', GB = '#c8ffd6', RED = '#ff6b6b', AMB = '#ffd23f';
 // 9x9 pixel football
 const BALL = ['..XXXXX..', '.XX...XX.', 'XX.XXX.XX', 'X.XXXXX.X', 'X..XXX..X', 'X.......X', 'XX.X.X.XX', '.XXX.XXX.', '..XXXXX..'];
@@ -41,7 +42,10 @@ export class Terminal {
   _txt(s, x, y, size = 16, col = G, align = 'left') {
     const c = this.x;
     c.font = `${size}px Silkscreen`; c.fillStyle = col; c.textAlign = align; c.textBaseline = 'top';
+    // phosphor glow
+    c.shadowColor = col; c.shadowBlur = col === BG ? 0 : 7;
     c.fillText(s, x, y);
+    c.shadowBlur = 0;
   }
   _wrap(s, max, size) {
     this.x.font = `${size}px Silkscreen`;
@@ -54,8 +58,15 @@ export class Terminal {
   update(dt) {
     this.t += dt;
     const x = this.x, S = this.state;
-    x.fillStyle = '#050a07'; x.fillRect(0, 0, W, H);
+    x.fillStyle = BG; x.fillRect(0, 0, W, H);
     x.imageSmoothingEnabled = false;
+    // faint double frame + a phosphor smear line that rolls down the tube
+    x.strokeStyle = 'rgba(125,255,154,0.16)'; x.lineWidth = 1;
+    x.strokeRect(4.5, 4.5, W - 9, H - 9); x.strokeRect(7.5, 7.5, W - 15, H - 15);
+    const ry = (this.t * 40) % (H + 60) - 30;
+    const rg = x.createLinearGradient(0, ry - 30, 0, ry + 30);
+    rg.addColorStop(0, 'rgba(125,255,154,0)'); rg.addColorStop(0.5, 'rgba(125,255,154,0.05)'); rg.addColorStop(1, 'rgba(125,255,154,0)');
+    x.fillStyle = rg; x.fillRect(0, ry - 30, W, 60);
     const blink = Math.floor(this.t * 2) % 2 === 0;
     if (S.kind === 'text') {
       const ls = S.lines;
@@ -71,9 +82,11 @@ export class Terminal {
       if (S.sub) this._wrap(S.sub, W - 40, 16).forEach((l, i) => this._txt(l, W / 2, 140 + i * 22, 16, blink || !S.blinkSub ? G : GD, 'center'));
     }
     if (S.kind === 'review') {
-      this._txt(`TAPE ${S.caseNo}/${S.caseCount}`, 20, 18, 16, GB);
+      x.fillStyle = G; x.fillRect(12, 12, W - 24, 26);
+      this._txt(`TAPE ${S.caseNo}/${S.caseCount}`, 20, 17, 16, BG);
       const s = Math.floor(S.seconds);
-      this._txt(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, W - 20, 18, 16, S.pressure > 0.8 && blink ? RED : G, 'right');
+      if (S.pressure > 0.8 && blink) { x.fillStyle = RED; x.fillRect(W - 92, 12, 80, 26); }
+      this._txt(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, W - 20, 17, 16, BG, 'right');
       this._txt('CROWD', 20, 50, 16, GD);
       x.fillStyle = GD; x.fillRect(100, 54, W - 120, 12);
       x.fillStyle = S.pressure > 0.8 ? RED : S.pressure > 0.5 ? AMB : G; x.fillRect(100, 54, (W - 120) * S.pressure, 12);

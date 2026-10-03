@@ -37,15 +37,27 @@ export const InkShader = {
     ${EDGE_GLSL}
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main() {
+      vec2 q = vUv - 0.5;
+      float r2 = dot(q, q);
+      // lens: a touch of colour fringing toward the corners, like an old camcorder
+      vec2 off = q * r2 * 0.012;
       vec4 col = texture2D(tDiffuse, vUv);
+      col.r = texture2D(tDiffuse, vUv + off).r;
+      col.b = texture2D(tDiffuse, vUv - off).b;
       vec2 px = thickness / resolution;
       float e = edgeAt(vUv, px, 0.012, 0.35);
       // slight wobble in the line weight so it reads hand-inked
       float w = 0.85 + 0.15 * hash(floor(vUv * resolution / 3.0));
       col.rgb = mix(col.rgb, ink, clamp(e * w, 0., 1.) * 0.92);
-      vec2 q = vUv - 0.5;
-      col.rgb *= 1.0 - vignette * dot(q, q) * 1.6;
-      col.rgb += (hash(vUv * resolution + time) - 0.5) * 0.012;
+      // grade: teal shadows, warm highlights, a little extra saturation
+      float l = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+      col.rgb = max(mix(vec3(l), col.rgb, 1.07), 0.0);
+      col.rgb += vec3(-0.006, 0.006, 0.014) * (1.0 - smoothstep(0.0, 0.35, l));
+      col.rgb *= mix(vec3(1.0), vec3(1.04, 1.0, 0.94), smoothstep(0.3, 1.0, l));
+      col.rgb *= 1.0 - vignette * r2 * 1.8;
+      // film grain, stronger in the shadows
+      float g = hash(floor(vUv * resolution / 1.5) + fract(time * 7.13) * 100.0) - 0.5;
+      col.rgb += g * mix(0.035, 0.012, smoothstep(0.0, 0.5, l));
       gl_FragColor = col;
     }`,
 };
@@ -57,18 +69,25 @@ export function pixelMaterial() {
     uniforms: {
       tColor: { value: null }, tDepth: { value: null }, tNormal: { value: null }, tOSD: { value: null },
       resolution: { value: new THREE.Vector2(480, 360) }, cameraNear: { value: 0.3 }, cameraFar: { value: 600 },
-      ink: { value: new THREE.Color(0x0d1118) }, ghost: { value: 0 },
+      ink: { value: new THREE.Color(0x0d1118) }, ghost: { value: 0 }, levels: { value: 9 },
     },
     vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`,
     fragmentShader: /* glsl */`
-      uniform sampler2D tColor, tDepth, tNormal, tOSD; uniform vec2 resolution; uniform float cameraNear, cameraFar, ghost; uniform vec3 ink;
+      uniform sampler2D tColor, tDepth, tNormal, tOSD; uniform vec2 resolution; uniform float cameraNear, cameraFar, ghost, levels; uniform vec3 ink;
       varying vec2 vUv;
       ${EDGE_GLSL}
       void main() {
         vec4 col = texture2D(tColor, vUv);
         float e = edgeAt(vUv, 1.0 / resolution, 0.05, 0.6) * (1.0 - ghost * 0.7);
         col.rgb = mix(col.rgb, ink, e * 0.85);
-        col.rgb = floor(col.rgb * 24.0 + 0.5) / 24.0;
+        // 16-bit console look: a reduced palette with a 4x4 ordered dither
+        vec2 bp = mod(floor(vUv * resolution), 4.0);
+        int ix = int(bp.x), iy = int(bp.y);
+        float m[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+        float th = m[iy * 4 + ix] / 16.0 - 0.5;
+        vec3 g = pow(max(col.rgb, 0.0), vec3(1.0 / 2.2));
+        g = floor(g * levels + 0.5 + th * 0.9) / levels;
+        col.rgb = pow(clamp(g, 0.0, 1.0), vec3(2.2));
         vec4 o = texture2D(tOSD, vUv);
         col.rgb = mix(col.rgb, o.rgb, o.a);
         gl_FragColor = vec4(col.rgb, 1.0);
@@ -111,9 +130,17 @@ export function crtMaterial(tex, o = {}) {
           // a little horizontal colour bleed like composite video
           vec3 s2 = texture2D(tScreen, uv + vec2(1.5 / (rows * 1.333), 0.)).rgb;
           s = mix(s, vec3(s.r, s2.g, s2.b), 0.35);
+          // halation: bright phosphor bleeds a soft glow into the glass around it
+          vec2 hs = vec2(2.5 / (rows * 1.333), 2.5 / rows);
+          vec3 halo = texture2D(tScreen, uv + vec2(hs.x, 0.)).rgb + texture2D(tScreen, uv - vec2(hs.x, 0.)).rgb
+                    + texture2D(tScreen, uv + vec2(0., hs.y)).rgb + texture2D(tScreen, uv - vec2(0., hs.y)).rgb;
+          s += halo * 0.06;
           if (mono > 0.5) s = vec3(dot(s, vec3(0.3, 0.59, 0.11)));
-          float line = 0.72 + 0.28 * pow(abs(sin(uv.y * rows * 3.14159)), 1.4);
-          col = s * tint * line * gain;
+          float line = 0.7 + 0.3 * pow(abs(sin(uv.y * rows * 3.14159)), 1.4);
+          // aperture grille, at the display's pixel pitch so it never beats against the picture
+          float k = mod(gl_FragCoord.x, 3.0);
+          vec3 mask = k < 1.0 ? vec3(1.12, 0.92, 0.92) : k < 2.0 ? vec3(0.92, 1.12, 0.92) : vec3(0.92, 0.92, 1.12);
+          col = s * tint * line * gain * mask;
           col += (hash(uv * 500.0 + time) - 0.5) * (0.03 + noise * 0.4);
           col *= 0.94 + 0.06 * sin(time * 9.0 + uv.y * 4.0);
           vec2 q = uv - 0.5;
@@ -124,6 +151,10 @@ export function crtMaterial(tex, o = {}) {
         float edge = smoothstep(0.0, 0.035, min(min(uv.x, 1. - uv.x), min(uv.y, 1. - uv.y)));
         col *= edge * step(0.001, p);
         col += vec3(0.04, 0.05, 0.05) * (1.0 - dot(c, c) * 2.0);
+        // the glass: a soft window reflection top-left and a long diagonal sheen
+        float hl = smoothstep(0.42, 0.0, length((vUv - vec2(0.24, 0.84)) * vec2(1.0, 1.7)));
+        float sheen = exp(-pow((vUv.x * 0.8 + vUv.y - 1.05) * 6.0, 2.0)) * smoothstep(0.2, 0.9, vUv.y);
+        col += vec3(0.75, 0.85, 1.0) * (hl * 0.07 + sheen * 0.035);
         gl_FragColor = vec4(col, 1.0);
       }`,
   });

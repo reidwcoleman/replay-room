@@ -85,6 +85,7 @@ export class Review {
     this.stage.setMainScreen(this.view.output, OSD_H);
     this.live.setMatch({ a: k.attack.short, b: k.defend.short, sa: k.score[0], sb: k.score[1], min: k.minute });
     this.live.setBanner({ top: 'VAR CHECK', main: QUESTION[c.gen] || 'CHECK' });
+    this.stage.setBigScreen(['VAR', 'CHECK'], '#ffd23f', true);
     this.live.mode = 'check';
     this.live.anim = null;
     this.live.queue = null;
@@ -138,6 +139,7 @@ export class Review {
     if (!this.locked) {
       this.view.excite = 0.2 + pressure * 0.8;
       this.live.excite = 0.15 + pressure * 0.85;
+      this.stage.crowdHeat = this.live.excite;
       this.sound.crowdLevel(0.15 + pressure * 0.7);
       if (this.caseTime > this.nextNag) { this.nextNag += 18 + Math.random() * 10; this._nag(pressure); }
       this.term.review({ caseNo: this.ctx.caseNo, caseCount: this.ctx.caseCount, seconds: this.caseTime, pressure, question: this.case.clip.context.question, onField: this.case.clip.context.onField, arbiter: this.case.arbiter, flagged: this.flagged });
@@ -544,6 +546,7 @@ export class Review {
     const kinds = { Penalty: 'penalty', 'Free kick': 'free', 'Goal stands': 'goal', 'Award goal': 'goal', 'Play on': 'playon', 'Retake penalty': 'penalty', 'Disallow goal': entries.some((e) => e.type === 'Offside') ? 'offside' : 'nogoal' };
     const verdictOnLive = () => {
       this.live.setBanner({ top: 'VAR DECISION', main: decision.restart.toUpperCase(), color: '#1d6b3a' });
+      this.stage.setBigScreen(decision.restart.toUpperCase().split(' ').length > 1 ? decision.restart.toUpperCase().split(' ').slice(0, 2) : ['DECISION', decision.restart.toUpperCase()], '#8dff9f', false);
       this.sound.whistle();
       const loud = ['Goal stands', 'Award goal', 'Penalty'].includes(decision.restart);
       this.live.excite = loud ? 1 : 0.6;
