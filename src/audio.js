@@ -83,4 +83,13 @@ export class Sound {
   good() { this.tone(660, 660, 0.12, 0.1); this.tone(990, 990, 0.25, 0.1, 'sine', 0.1); }
   bad() { this.tone(300, 200, 0.3, 0.12, 'triangle'); }
   stamp() { this.burst(0.12, 0.4, 200, 0.6); this.tone(90, 50, 0.12, 0.25); }
+  key() { if (this._ok('key', 0.03)) { this.burst(0.03, 0.25, 3200, 2); this.tone(420, 300, 0.035, 0.06, 'square'); } }
+  blip() { if (this._ok('blip', 0.04)) this.tone(1500, 1500, 0.05, 0.035, 'square'); }
+  whoosh() { if (this._ok('whoosh', 0.3)) this.burst(0.35, 0.12, 900, 0.6); }
+  paper() { if (this._ok('paper', 0.08)) { this.burst(0.12, 0.18, 4200, 1.5); this.burst(0.08, 0.1, 2400, 1, 0.05); } }
+  peel() { if (this._ok('peel', 0.08)) this.burst(0.16, 0.16, 5200, 3); }
+  stick() { if (this._ok('stick', 0.05)) { this.burst(0.05, 0.3, 1800, 1); this.tone(220, 140, 0.06, 0.12, 'triangle'); } }
+  coin() { this.tone(988, 988, 0.06, 0.06, 'square'); this.tone(1319, 1319, 0.12, 0.06, 'square', 0.06); }
+  tapeIn() { if (this._ok('tape', 0.3)) { this.burst(0.08, 0.35, 700, 1); this.tone(110, 70, 0.1, 0.2, 'square', 0.05); this.burst(0.25, 0.1, 300, 0.8, 0.12); } }
+  boo() { if (this._ok('boo', 1)) { this.burst(1.8, 0.35, 220, 1.4); this.burst(1.6, 0.2, 340, 2, 0.15); } }
 }

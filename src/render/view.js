@@ -1,9 +1,14 @@
-// The replay monitor: scene, camera angles, zoom/pan, player picking and offside lines.
+// The replay feed: scene, camera angles, zoom/pan, player picking and offside lines. It renders
+// into a small render target (chunky pixels + ink outlines) that the main CRT on the desk shows.
+// Input arrives as screen UVs (0..1, v down) from whatever is displaying the feed.
 import * as THREE from 'three';
 import { buildStadium } from './stadium.js';
 import { PlayerMesh, setGhost } from './players.js';
 import { SCORING } from '../sim/kinematics.js';
 import { BALL_R, GOAL_X } from '../sim/clip.js';
+import { pixelMaterial } from './crt.js';
+import { toon } from './toon.js';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
 export const CAMS = [
   { id: 'broadcast', label: 'Main' },
@@ -15,16 +20,22 @@ export const CAMS = [
 ];
 
 export class ReplayView {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: false });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+  constructor(renderer, w = 480, h = 360) {
+    this.renderer = renderer;
+    this.w = w; this.h = h;
+    const mk = (o = {}) => { const t = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, ...o }); return t; };
+    this.colorRT = mk({ samples: 0 });
+    this.colorRT.texture.colorSpace = THREE.SRGBColorSpace;
+    this.ndRT = mk({ depthTexture: new THREE.DepthTexture(w, h) });
+    this.outRT = mk();
+    this.outRT.texture.colorSpace = THREE.SRGBColorSpace;
+    this.output = this.outRT.texture;
+    this.normalMat = new THREE.MeshNormalMaterial();
+    this.pix = pixelMaterial();
+    this.pix.uniforms.resolution.value.set(w, h);
+    this.quad = new FullScreenQuad(this.pix);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.3, 600);
+    this.camera = new THREE.PerspectiveCamera(30, w / h, 0.3, 600);
     this.stadium = null;
     this.players = [];
     this.clip = null;
@@ -42,10 +53,11 @@ export class ReplayView {
     this.excite = 0.3;
 
     const ballTex = ballTexture();
-    this.ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 24, 16), new THREE.MeshStandardMaterial({ map: ballTex, roughness: 0.4 }));
+    this.ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 24, 16), toon(0xffffff, { map: ballTex }));
     this.ball.castShadow = true;
     this.scene.add(this.ball);
-    this._bindInput();
+    this.drag = null;
+    this.cursor = 'grab';
   }
 
   load(clip) {
@@ -79,14 +91,6 @@ export class ReplayView {
   }
 
   setCam(id) { this.cam = id; this.zoom = id === 'goalline' ? 2 : 1; this.pan.set(0, 0); }
-
-  resize() {
-    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-    if (!w || !h) return;
-    this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-  }
 
   _smoothBall(t) {
     let x = 0, y = 0, z = 0, n = 0;
@@ -131,9 +135,8 @@ export class ReplayView {
     c.updateProjectionMatrix();
   }
 
-  render(dt = 0) {
+  render(dt = 0, osd = null) {
     if (!this.clip) return;
-    this.resize();
     this._placeCamera();
     // Goal-line view is a reconstruction: no goal frame, ghosted players, so the ball is never hidden.
     const virt = this.cam === 'goalline';
@@ -149,14 +152,36 @@ export class ReplayView {
       p.ring.material.opacity = p === this.hover && p !== this.selected ? 0.5 : 0.9;
     }
     // offside lines stay ~2.5 px wide at any distance / zoom
-    const hPx = this.canvas.clientHeight || 600;
+    const hPx = this.h;
     for (const l of this.lines) {
       const d = this.camera.position.distanceTo(l.mesh.position.clone().setZ(this.camera.position.z * 0 + this._smoothBall(this.t).z));
       const perPx = (2 * d * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / hPx;
-      l.mesh.children[0].scale.set(Math.max(1, (perPx * 2.5) / 0.035), 1, 1);
+      l.mesh.children[0].scale.set(Math.max(1, (perPx * 1.6) / 0.035), 1, 1);
     }
     if (this.stadium) this.stadium.update(dt, this.excite);
-    this.renderer.render(this.scene, this.camera);
+    const r = this.renderer, prev = r.getRenderTarget();
+    // depth + normals for the outline pass (lines and rings stay out of it)
+    const hidden = [];
+    for (const l of this.lines) { l.mesh.visible = false; hidden.push(l.mesh); }
+    for (const p of this.players) if (p.ring.visible) { p.ring.visible = false; hidden.push(p.ring); }
+    this.scene.overrideMaterial = this.normalMat;
+    r.setRenderTarget(this.ndRT);
+    r.render(this.scene, this.camera);
+    this.scene.overrideMaterial = null;
+    for (const m of hidden) m.visible = true;
+    r.shadowMap.needsUpdate = true;
+    r.setRenderTarget(this.colorRT);
+    r.render(this.scene, this.camera);
+    const u = this.pix.uniforms;
+    u.tColor.value = this.colorRT.texture;
+    u.tDepth.value = this.ndRT.depthTexture;
+    u.tNormal.value = this.ndRT.texture;
+    u.tOSD.value = osd;
+    u.cameraNear.value = this.camera.near; u.cameraFar.value = this.camera.far;
+    u.ghost.value = virt ? 1 : 0;
+    r.setRenderTarget(this.outRT);
+    this.quad.render(r);
+    r.setRenderTarget(prev);
   }
 
   // ---- offside lines ----
@@ -197,67 +222,57 @@ export class ReplayView {
     return this.lines.map((l) => ({ actor: l.pm.actor, x: this.furthestX(l.pm.actor).x, part: this.furthestX(l.pm.actor).part, color: l.color }));
   }
 
-  // ---- input: wheel zoom, drag pan / orbit, click to pick ----
-  _bindInput() {
-    const el = this.canvas;
-    let drag = null;
-    el.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const z0 = this.zoom;
-      this.zoom = Math.max(0.6, Math.min(this.cam === 'goalline' ? 40 : 14, this.zoom * Math.exp(-e.deltaY * 0.0015)));
-      // zoom toward the cursor
-      const r = el.getBoundingClientRect();
-      const nx = ((e.clientX - r.left) / r.width) * 2 - 1, ny = -(((e.clientY - r.top) / r.height) * 2 - 1);
-      // keep the point under the cursor fixed: (pan + n) / zoom is constant
-      const ax = nx * this.camera.aspect, ay = ny;
-      this.pan.x = (this.pan.x + ax) * (this.zoom / z0) - ax;
-      this.pan.y = (this.pan.y + ay) * (this.zoom / z0) - ay;
-      this.pan.x = clampPan(this.pan.x); this.pan.y = clampPan(this.pan.y);
-    }, { passive: false });
-    el.addEventListener('pointerdown', (e) => {
-      drag = { x: e.clientX, y: e.clientY, moved: false, button: e.button };
-      el.setPointerCapture(e.pointerId);
-    });
-    el.addEventListener('pointermove', (e) => {
-      if (!drag) { this.hover = this.pickAt(e.clientX, e.clientY); el.style.cursor = this.hover ? 'pointer' : this.lineMode ? 'crosshair' : 'grab'; return; }
-      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-      drag.x = e.clientX; drag.y = e.clientY;
-      const h = el.clientHeight;
-      if (this.cam === 'free' && drag.button === 0 && !e.shiftKey) {
-        this.orbit.yaw += dx * 0.006;
-        this.orbit.pitch = Math.max(0.05, Math.min(1.45, this.orbit.pitch + dy * 0.005));
-      } else {
-        this.pan.x = clampPan(this.pan.x - (dx / h) * 2 / 1);
-        this.pan.y = clampPan(this.pan.y + (dy / h) * 2 / 1);
-      }
-      el.style.cursor = 'grabbing';
-    });
-    el.addEventListener('pointerup', (e) => {
-      if (drag && !drag.moved) {
-        const pm = this.pickAt(e.clientX, e.clientY);
-        if (this.lineMode && pm) this.addLine(pm);
-        else this.selected = pm && pm !== this.selected ? pm : null;
-        if (this.onPick) this.onPick(pm ? pm.actor : null);
-      }
-      drag = null;
-      el.style.cursor = this.lineMode ? 'crosshair' : 'grab';
-    });
-    el.addEventListener('dblclick', () => { this.zoom = this.cam === 'goalline' ? 2 : 1; this.pan.set(0, 0); });
+  // ---- input (u, v in 0..1, v down) ----
+  wheel(u, v, deltaY) {
+    const z0 = this.zoom;
+    this.zoom = Math.max(0.6, Math.min(this.cam === 'goalline' ? 40 : 14, this.zoom * Math.exp(-deltaY * 0.0015)));
+    // keep the point under the cursor fixed: (pan + n) / zoom is constant
+    const ax = (u * 2 - 1) * this.camera.aspect, ay = -(v * 2 - 1);
+    this.pan.x = clampPan((this.pan.x + ax) * (this.zoom / z0) - ax);
+    this.pan.y = clampPan((this.pan.y + ay) * (this.zoom / z0) - ay);
   }
+  pointerDown(u, v, button = 0) { this.drag = { u, v, moved: false, button }; }
+  pointerMove(u, v, shift = false) {
+    const d = this.drag;
+    if (!d) { this.hover = this.pickAt(u, v); this.cursor = this.hover ? 'pointer' : this.lineMode ? 'crosshair' : 'grab'; return; }
+    const du = u - d.u, dv = v - d.v;
+    if (Math.abs(du) * this.w + Math.abs(dv) * this.h > 3) d.moved = true;
+    d.u = u; d.v = v;
+    if (this.cam === 'free' && d.button === 0 && !shift) {
+      this.orbit.yaw += du * this.w * 0.012;
+      this.orbit.pitch = Math.max(0.05, Math.min(1.45, this.orbit.pitch + dv * this.h * 0.01));
+    } else {
+      this.pan.x = clampPan(this.pan.x - du * 2 * this.camera.aspect);
+      this.pan.y = clampPan(this.pan.y + dv * 2);
+    }
+    this.cursor = 'grabbing';
+  }
+  // returns the picked actor (or null) when the press was a click, undefined after a drag
+  pointerUp(u, v) {
+    const d = this.drag;
+    this.drag = null;
+    this.cursor = this.lineMode ? 'crosshair' : 'grab';
+    if (!d || d.moved) return undefined;
+    const pm = this.pickAt(u, v);
+    if (this.lineMode && pm) this.addLine(pm);
+    else this.selected = pm && pm !== this.selected ? pm : null;
+    if (this.onPick) this.onPick(pm ? pm.actor : null);
+    return pm ? pm.actor : null;
+  }
+  resetView() { this.zoom = this.cam === 'goalline' ? 2 : 1; this.pan.set(0, 0); }
 
-  pickAt(cx, cy) {
+  pickAt(u, v) {
     if (!this.clip) return null;
-    const r = this.canvas.getBoundingClientRect();
-    const mx = cx - r.left, my = cy - r.top;
-    let best = null, bd = 26;
-    const v = new THREE.Vector3();
+    const mx = u * this.w, my = v * this.h;
+    let best = null, bd = 14;
+    const p3 = new THREE.Vector3();
+    this.camera.updateMatrixWorld();
     for (const p of this.players) {
       const j = p.actor.jointsAt(this.t);
       for (const k of ['head', 'chest', 'pelvis', 'knL', 'knR', 'anL', 'anR']) {
-        v.set(...j[k]).project(this.camera);
-        if (v.z > 1) continue;
-        const sx = (v.x + 1) / 2 * r.width, sy = (1 - v.y) / 2 * r.height;
+        p3.set(...j[k]).project(this.camera);
+        if (p3.z > 1) continue;
+        const sx = (p3.x + 1) / 2 * this.w, sy = (1 - p3.y) / 2 * this.h;
         const d = Math.hypot(sx - mx, sy - my);
         if (d < bd) { bd = d; best = p; }
       }
@@ -275,12 +290,12 @@ export class ReplayView {
     this.pan.set(v.x * this.camera.aspect * zoom, v.y * zoom);
   }
 
-  // Screen position of an actor's head (for labels).
-  screenOf(actor) {
-    const r = this.canvas.getBoundingClientRect();
-    const v = new THREE.Vector3(...actor.jointsAt(this.t).head).add(new THREE.Vector3(0, 0.45, 0)).project(this.camera);
-    return { x: (v.x + 1) / 2 * r.width, y: (1 - v.y) / 2 * r.height, visible: v.z < 1 };
+  // Feed-pixel position of a world point / an actor's head (for OSD labels).
+  screenOfPoint(p) {
+    const v = new THREE.Vector3(...p).project(this.camera);
+    return { x: (v.x + 1) / 2 * this.w, y: (1 - v.y) / 2 * this.h, visible: v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 };
   }
+  screenOf(actor) { const h = actor.jointsAt(this.t).head; return this.screenOfPoint([h[0], h[1] + 0.4, h[2]]); }
 }
 
 const clampPan = (v) => Math.max(-40, Math.min(40, v));

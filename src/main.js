@@ -1,12 +1,17 @@
 import { App, newState } from './app.js';
 import { Sound } from './audio.js';
 
-const sound = new Sound();
-const app = new App(document.getElementById('app'), sound);
-addEventListener('pointerdown', () => sound.unlock(), { once: false });
-
-// ?day=N&case=M jumps straight into a case (testing); ?title shows the title.
 const q = new URLSearchParams(location.search);
+const sound = new Sound();
+addEventListener('pointerdown', () => sound.unlock());
+
+// Canvas text (CRTs, stickers, posters) needs the web fonts loaded before the first draw.
+const fonts = ['8px Silkscreen', '16px Silkscreen', '700 20px Nunito', '800 20px Nunito', '900 20px Nunito', '700 20px Caveat'];
+await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f))), new Promise((r) => setTimeout(r, 2500))]);
+
+const app = new App(document.getElementById('app'), sound, { fast: q.has('fast') });
+
+// ?day=N&case=M jumps straight into a case (testing).
 if (q.has('day')) {
   const s = newState(+(q.get('seed') || 12345));
   s.day = +q.get('day');

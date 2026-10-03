@@ -2,17 +2,18 @@
 // kit colours per team, numbers on the back.
 import * as THREE from 'three';
 import { DIM } from '../sim/kinematics.js';
+import { gradientMap } from './toon.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const SKINS = [0xf1c7a5, 0xd9a47c, 0xb57c55, 0x8a5636, 0x5e3a24, 0xe8b894];
 const HAIR = [0x1a1410, 0x3b2a1e, 0x6b4a2b, 0xc9a35a, 0x0f0f0f, 0x8c3b1d];
 
-const cyl = new THREE.CylinderGeometry(1, 1, 1, 10, 1);
-const sph = new THREE.SphereGeometry(1, 14, 10);
+const cyl = new THREE.CylinderGeometry(1, 1, 1, 8, 1);
+const sph = new THREE.SphereGeometry(1, 12, 8);
 const matCache = new Map();
 const mat = (hex, r = 0.75) => {
   const k = hex + ':' + r;
-  if (!matCache.has(k)) matCache.set(k, new THREE.MeshStandardMaterial({ color: hex, roughness: r }));
+  if (!matCache.has(k)) matCache.set(k, new THREE.MeshToonMaterial({ color: hex, gradientMap: gradientMap() }));
   return matCache.get(k);
 };
 
@@ -21,7 +22,7 @@ export function setGhost(on) {
 }
 
 export class PlayerMesh {
-  constructor(actor, kit) {
+  constructor(actor, kit, o = {}) {
     this.actor = actor;
     const gk = actor.keeper;
     const shirt = gk ? kit.gk : kit.shirt;
@@ -53,6 +54,13 @@ export class PlayerMesh {
     const head = ball('head', DIM.headR, skin, 1.1);
     const hairM = ball('head', DIM.headR * 1.04, hair, 0.75);
     this.hair = hairM;
+    // close-up figures (the referee on the live feed) get a face
+    if (o.face) {
+      this.eyes = [0, 1].map(() => { const e = new THREE.Mesh(sph, mat(0x1a1410)); e.scale.setScalar(0.014); this.group.add(e); return e; });
+      this.mouth = new THREE.Mesh(cyl, mat(0x7a3a2a));
+      this.mouth.scale.set(0.006, 0.04, 0.006);
+      this.group.add(this.mouth);
+    }
     for (const s of ['L', 'R']) {
       limb('sh' + s, 'el' + s, 0.062, shirt);
       limb('el' + s, 'ha' + s, 0.048, gk ? shirt : skin);
@@ -84,15 +92,21 @@ export class PlayerMesh {
       p.m.quaternion.setFromUnitVectors(UP, d.divideScalar(len || 1));
       p.m.scale.set(p.r, len, p.r);
     }
-    // hair cap sits slightly up and back on the head
-    const up = new THREE.Vector3(...j.head).sub(new THREE.Vector3(...j.neck)).normalize();
-    this.hair.position.set(...j.head).addScaledVector(up, 0.025);
-    this.hair.quaternion.setFromUnitVectors(UP, up);
-    // back number: behind the chest, facing backwards
     const chest = new THREE.Vector3(...j.chest), pel = new THREE.Vector3(...j.pelvis);
     const spine = chest.clone().sub(pel).normalize();
     const side = new THREE.Vector3(...j.shR).sub(new THREE.Vector3(...j.shL)).normalize();
     const fwd = new THREE.Vector3().crossVectors(side, spine).normalize();
+    // hair cap sits up and back on the head, leaving the face clear
+    const up = new THREE.Vector3(...j.head).sub(new THREE.Vector3(...j.neck)).normalize();
+    this.hair.position.set(...j.head).addScaledVector(up, 0.04).addScaledVector(fwd, -0.035);
+    this.hair.quaternion.setFromUnitVectors(UP, up);
+    if (this.eyes) {
+      const hd = new THREE.Vector3(...j.head), r = DIM.headR;
+      this.eyes.forEach((e, i) => e.position.copy(hd).addScaledVector(fwd, r * 0.93).addScaledVector(side, (i ? 1 : -1) * r * 0.36).addScaledVector(up, r * 0.15));
+      this.mouth.position.copy(hd).addScaledVector(fwd, r * 0.95).addScaledVector(up, -r * 0.4);
+      this.mouth.quaternion.setFromUnitVectors(UP, side);
+    }
+    // back number: behind the chest, facing backwards
     this.num.position.copy(pel).lerp(chest, 0.62).addScaledVector(fwd, -0.205);
     const m = new THREE.Matrix4().makeBasis(side.clone().negate(), spine, fwd.clone().negate());
     this.num.quaternion.setFromRotationMatrix(m);
@@ -109,7 +123,7 @@ function numberPlane(n, color, gk) {
     c.width = c.height = 128;
     const x = c.getContext('2d');
     x.fillStyle = '#' + new THREE.Color(color).getHexString();
-    x.font = '800 96px "Space Grotesk", system-ui, sans-serif';
+    x.font = '900 96px Nunito, sans-serif';
     x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(String(n), 64, 70);
     tex = new THREE.CanvasTexture(c);

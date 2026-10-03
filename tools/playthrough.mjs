@@ -7,7 +7,7 @@ const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
-await page.goto('http://localhost:5240/');
+await page.goto('http://localhost:5240/?fast');
 await page.waitForFunction(() => window.__ready);
 await page.evaluate(() => localStorage.clear());
 await page.reload(); await page.waitForFunction(() => window.__ready);
@@ -26,6 +26,7 @@ for (let day = 1; day <= 5; day++) {
   let k = 0;
   while (true) {
     await page.waitForSelector('.review-screen', { timeout: 10000 });
+    await page.waitForFunction(() => __app.review && __app.review.case && !__app.review.locked);
     await page.evaluate(() => document.querySelector('.coach')?.remove());
     const info = await page.evaluate((mode) => {
       const r = __app.review, c = r.case;
@@ -40,6 +41,7 @@ for (let day = 1; day <= 5; day++) {
       r._submit();
       return { gen: c.gen, restart: t.restart, offs: t.infringements.map((i) => `${i.type}/${i.card}#${i.num}${i.offBall ? '(off)' : ''}`).join(','), arb: c.arbiter ? `${c.arbiter.restart}${c.arbiter.wrong ? '(WRONG)' : ''}` : '', bribe: c.bribe ? c.bribe.wants : '', teams: `${c.clip.attacking.short}-${c.clip.defending.short}` };
     }, mode);
+    await page.waitForSelector('.v-score b');
     const score = await page.$eval('.v-score b', (e) => e.textContent);
     console.log(`D${day} C${++k} ${info.gen.padEnd(9)} ${info.teams} → ${info.restart.padEnd(14)} ${info.offs.padEnd(40)} score ${score} ${info.arb ? 'ARB ' + info.arb : ''} ${info.bribe ? 'BRIBE wants ' + info.bribe : ''}`);
     if (day === 4 && k === 3) await page.screenshot({ path: `shots/pt-verdict-${mode}.png` });

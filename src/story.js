@@ -16,15 +16,16 @@ export const DAYS = [
         'Welcome aboard. You are now a remote video reviewer for the Coastal Premier League, contracted through Lumen.',
         'Stadiums flag contested moments to us. Each one arrives on your monitor as a replay. Review it, log any offences you find, and confirm the correct restart.',
         'You are scored on accuracy and speed. Base pay is $140 a shift, with a bonus for accuracy. Probation lasts five shifts.',
-        'Today is challenges and simulation only. Your rulebook is on the right-hand panel. Read it.',
+        'Today is challenges and simulation only. The red rulebook is on your desk. Read it.',
         '— M. Hale',
       ] },
       { ...DEE, subject: 'tips from booth 2', body: [
         'hey new person!! a few things nobody tells you:',
-        '1. Watch it at 0.25x. Then watch it again. Then frame-step the contact with , and .',
-        '2. Click the log entries. They jump straight to the moment.',
-        '3. Zoom with the scroll wheel and drag to pan. The tactical cam is your friend.',
-        '4. "Ball first" is everything on tackles. If the boot gets the ball before the man, leave it.',
+        '1. Slow it down with the down arrow on the deck. Then frame-step the contact with , and .',
+        '2. The log tab in the tape panel jumps straight to each moment.',
+        '3. Scroll on the monitor to zoom, drag to pan. CAM cycles angles. The tactical cam is your friend.',
+        '4. Stick an offence on the tape, then put the player\'s shirt on it. Cards go on the same sticker. Restart goes on the label.',
+        '5. "Ball first" is everything on tackles. If the boot gets the ball before the man, leave it.',
         'good luck — Dee',
       ] },
     ],
@@ -55,7 +56,7 @@ export const DAYS = [
     day: 3, name: 'Wednesday', title: 'Lines',
     emails: [
       { ...HALE, subject: 'Offside lines', body: [
-        'Offside reviews start today. Use the line tool (O), then click the attacker and the second-last defender at the exact frame the pass is played.',
+        'Offside reviews start today. Press LINE on the deck (or O), then click the attacker and the second-last defender at the exact frame the pass is played.',
         'Arms do not count. The line snaps to the player’s furthest scoring body part.',
         'One of today’s cases is Seren City v Redmill Rovers. The league is watching that fixture closely, so get it right.',
       ] },
@@ -83,7 +84,7 @@ export const DAYS = [
       { ...DEE, subject: 'am I crazy', body: [
         'ok am I crazy or does ARBITER always seem to find a way for Seren City?',
         'yesterday it told me a Seren handball was "natural position". It was not natural. The guy was doing a starfish.',
-        'If you think it’s wrong, hit FLAG on the suggestion. Flags go into the audit log, and Lumen can’t delete those (legal reasons).',
+        'If you think it’s wrong, open the ARBITER tab in the tape panel and flag it. Flags go into the audit log, and Lumen can’t delete those (legal reasons).',
       ] },
       { ...K, subject: 'pleasure doing business', requires: { bribe1: 'yes' }, body: [
         'The goal stood. Money’s in. See? Easy.',

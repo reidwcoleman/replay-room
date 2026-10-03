@@ -1,6 +1,7 @@
 // Pitch, goals, stands, crowd, boards and floodlights. Line positions are exact (FIFA dimensions).
 import * as THREE from 'three';
 import { GOAL_X, HALF_W, GOAL_HALF_W, GOAL_H } from '../sim/clip.js';
+import { toon } from './toon.js';
 
 const LINE = 0.12;
 
@@ -15,15 +16,15 @@ export function buildStadium(scene, home) {
   const x = c.getContext('2d');
   const sx = W / 120, sz = H / 80;
   const px = (m) => (m + 60) * sx, pz = (m) => (m + 40) * sz;
-  x.fillStyle = '#2f7d3a'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#4fae3f'; x.fillRect(0, 0, W, H);
   for (let i = 0; i < 20; i++) {
-    x.fillStyle = i % 2 ? '#368a42' : '#2c7637';
+    x.fillStyle = i % 2 ? '#5cbf48' : '#4ba63c';
     x.fillRect(px(-52.5 + i * 5.25), pz(-34), 5.25 * sx + 1, 68 * sz);
   }
   // grain
-  for (let i = 0; i < 40000; i++) {
-    x.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.035)';
-    x.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+  for (let i = 0; i < 14000; i++) {
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.03)' : 'rgba(0,40,0,0.05)';
+    x.fillRect(Math.random() * W, Math.random() * H, 4, 4);
   }
   x.strokeStyle = 'rgba(255,255,255,0.92)';
   x.lineWidth = LINE * sx;
@@ -45,7 +46,7 @@ export function buildStadium(scene, home) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 16;
-  const pitch = new THREE.Mesh(new THREE.PlaneGeometry(120, 80), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+  const pitch = new THREE.Mesh(new THREE.PlaneGeometry(120, 80), toon(0xffffff, { map: tex }));
   pitch.rotation.x = -Math.PI / 2;
   pitch.receiveShadow = true;
   g.add(pitch);
@@ -60,7 +61,7 @@ export function buildStadium(scene, home) {
   }
 
   // ---- goals ----
-  const post = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+  const post = toon(0xffffff);
   const netMat = new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, side: THREE.DoubleSide, depthWrite: false });
   const goals = [];
   for (const s of [-1, 1]) {
@@ -98,7 +99,7 @@ export function buildStadium(scene, home) {
   }
 
   // ---- surrounds ----
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(170, 130), new THREE.MeshStandardMaterial({ color: 0x23552c, roughness: 1 }));
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(170, 130), toon(0x3f8f35));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.08;
   g.add(apron);
@@ -114,17 +115,17 @@ export function buildStadium(scene, home) {
   }
 
   // stands: tiers + instanced crowd
-  const standMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.9 });
-  const seatColors = [0x3a4152, 0x343a49];
+  const standMat = toon(0x40465a);
+  const seatColors = [0x55607a, 0x4a546c];
   const crowdGeo = new THREE.PlaneGeometry(0.55, 0.8);
-  const crowdMat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
+  const crowdMat = new THREE.MeshToonMaterial({ side: THREE.DoubleSide });
   const people = [];
   const homeHex = home ? home.shirt : 0x1d3a8a;
-  const palette = [homeHex, homeHex, 0xf2f2f2, 0x2a2a2a, 0xc9a27e, 0x8b5a3c, 0x4a6fa5, 0xd04040, homeHex, 0xe8d36b];
+  const palette = [homeHex, homeHex, 0xf2f2f2, 0x2a2a2a, 0xe0b48e, 0x9b6a4c, 0x4a7fd5, 0xe04848, homeHex, 0xf2d84b, 0x50c8a0];
   const addStand = (cx, cz, rot, len) => {
     const stand = new THREE.Group();
     for (let i = 0; i < 14; i++) {
-      const step = new THREE.Mesh(new THREE.BoxGeometry(len, 0.55, 0.9), new THREE.MeshStandardMaterial({ color: seatColors[i % 2], roughness: 0.9 }));
+      const step = new THREE.Mesh(new THREE.BoxGeometry(len, 0.55, 0.9), toon(seatColors[i % 2]));
       step.position.set(0, 1.4 + i * 0.55, -i * 0.9);
       stand.add(step);
       for (let k = -len / 2 + 0.4; k < len / 2 - 0.4; k += 0.62) {
@@ -135,7 +136,7 @@ export function buildStadium(scene, home) {
     const back = new THREE.Mesh(new THREE.BoxGeometry(len, 12, 1), standMat);
     back.position.set(0, 6, -13.2);
     stand.add(back);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 2, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0x1b1f28, roughness: 0.6, metalness: 0.3 }));
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 2, 0.5, 16), toon(0x2a3040));
     roof.position.set(0, 13, -6);
     stand.add(roof);
     stand.position.set(cx, 0, cz);
@@ -162,7 +163,7 @@ export function buildStadium(scene, home) {
 
   // floodlights
   for (const [fx, fz] of [[-58, -44], [58, -44], [-58, 44], [58, 44]]) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 34, 10), new THREE.MeshStandardMaterial({ color: 0x9aa0aa }));
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 34, 10), toon(0xb8bec8));
     pole.position.set(fx, 17, fz);
     g.add(pole);
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 0.6), new THREE.MeshBasicMaterial({ color: 0xfff8e0 }));
@@ -172,22 +173,19 @@ export function buildStadium(scene, home) {
   }
 
   // lights
-  scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x2d4a2a, 1.25));
-  const sun = new THREE.DirectionalLight(0xfff4e2, 2.3);
+  scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x3a5a30, 1.6));
+  const sun = new THREE.DirectionalLight(0xfff4e2, 2.1);
   sun.position.set(-30, 60, -25);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
   sc.left = -62; sc.right = 62; sc.top = 42; sc.bottom = -42; sc.near = 10; sc.far = 160;
   sun.shadow.bias = -0.0003;
   sun.shadow.normalBias = 0.02;
   scene.add(sun);
-  const fill = new THREE.DirectionalLight(0xcfe0ff, 0.5);
-  fill.position.set(30, 40, 30);
-  scene.add(fill);
 
-  scene.background = new THREE.Color(0x0e1420);
-  scene.fog = new THREE.Fog(0x0e1420, 120, 260);
+  scene.background = new THREE.Color(0x7fb6e0);
+  scene.fog = new THREE.Fog(0x9cc6e6, 140, 300);
 
   let t = 0;
   return {
@@ -234,7 +232,7 @@ function boardTexture() {
   const w = 2048 / ads.length;
   ads.forEach(([t, bg, fg], i) => {
     x.fillStyle = bg; x.fillRect(i * w, 0, w, 64);
-    x.fillStyle = fg; x.font = '800 34px "Space Grotesk", system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = fg; x.font = '900 34px Nunito, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(t, i * w + w / 2, 34);
   });
   const t = new THREE.CanvasTexture(c);
